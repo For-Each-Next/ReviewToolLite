@@ -1,9 +1,11 @@
-import {addPortletTrigger, addVectorMenuTab, getHeadingTitle} from "./utils";
+import {addPortletTrigger, getHeadingTitle} from "./utils";
 import state from "../state";
 import {
     createAnnotation,
     deleteAnnotation,
     getAnnotation,
+    importAnnotations,
+    loadAnnotations,
     updateAnnotation,
     buildAnnotationGroups,
     clearAnnotations
@@ -16,6 +18,7 @@ import {
     updateAnnotationViewerDialogGroups
 } from "../dialogs/annotation_viewer";
 import { getElementOrderKey } from "./numeric_pos";
+import { buildArticleTextIndex, captureAnnotationAnchor, findAnnotationRange } from './annotation_anchor';
 
 let floatingButton: HTMLElement | null = null;
 const ANNOTATION_CONTAINER_CLASS = 'review-tool-annotation-ui';
@@ -53,7 +56,7 @@ function getCleanTextFromElement(el: Element | null): string {
         // Remove typical ref/citation decorations that shouldn't be part of the sentence
         clone.querySelectorAll('sup.reference, sup.mw-ref, .reference, .mw-ref, .citation, .ref, .reference-text, .qeec-ref-tag-copy-btn').forEach(n => n.remove());
         // Remove elements commonly used by extensions/widgets
-        clone.querySelectorAll('[data-reference], [data-ref], .reference-note, .qeec-ref-tag-copy-btn').forEach(n => n.remove());
+        clone.querySelectorAll('[data-reference], [data-ref], .reference-note, .qeec-ref-tag-copy-btn, .review-tool-inline-annotation').forEach(n => n.remove());
     } catch (e) {
         console.error('[ReviewTool][getCleanTextFromElement] failed to remove decoration nodes', e);
         throw e;
@@ -67,7 +70,7 @@ function getCleanTextFromElement(el: Element | null): string {
 function removeDecorationsFromContainer(container: Element) {
     try {
         container.querySelectorAll('sup.reference, sup.mw-ref, .reference, .mw-ref, .citation, .ref, .reference-text, .qeec-ref-tag-copy-btn, style, ipe-quick-edit').forEach(n => n.remove());
-        container.querySelectorAll('[data-reference], [data-ref], .reference-note, .qeec-ref-tag-copy-btn').forEach(n => n.remove());
+        container.querySelectorAll('[data-reference], [data-ref], .reference-note, .qeec-ref-tag-copy-btn, .review-tool-inline-annotation').forEach(n => n.remove());
     } catch (e) {
         console.error('[ReviewTool][removeDecorationsFromContainer] failed', e);
         throw e;
@@ -497,7 +500,7 @@ export function wrapSectionSentences(sectionStart: Element, sectionEnd: Element 
         const el = node as Element;
 
         // Skip elements that are already wrapped by us
-        if (el.classList.contains(ANNOTATION_CONTAINER_CLASS)) return true;
+        if (el.classList.contains(ANNOTATION_CONTAINER_CLASS) || el.classList.contains('review-tool-inline-annotation')) return true;
 
         // Skip elements with data attributes indicating they're from other scripts
         if (el.hasAttribute('data-gadget') || el.hasAttribute('data-widget')) return true;
@@ -604,6 +607,7 @@ export function wrapSectionSentences(sectionStart: Element, sectionEnd: Element 
 
     // Process an element root - gather its text nodes and map offsets
     function processElementRoot(root: Element) {
+        if (shouldSkipElement(root)) return;
         const allowHalfWidth = shouldTreatHalfWidthTerminators(getComputedLang(root));
         // If this root has element children that are non-inline (block/boundary),
         // process each child separately to avoid creating ranges that span across
@@ -934,7 +938,37 @@ export function clearWrappedSentences() {
     });
     // also clear any annotation badges
     document.querySelectorAll('.review-tool-annotation-badge').forEach(badge => badge.remove());
-    clearAllInlineAnnotationBubbles();
+}
+
+function getArticleContentContainer(): Element | null {
+    const selectors = ['#mw-content-text .mw-parser-output', '#mw-content-text', '.mw-parser-output', '#content', '#bodyContent'];
+    for (const selector of selectors) {
+        const container = document.querySelector(selector);
+        if (container) return container;
+    }
+    return null;
+}
+
+function restoreInlineAnnotationBubbles(pageName: string): void {
+    const container = getArticleContentContainer();
+    if (!container) return;
+    const annotations = loadAnnotations(pageName).annotations;
+    const ids = new Set(annotations.map(annotation => annotation.id));
+    inlineAnnotationBubbles.forEach((bubble, id) => {
+        if (!container.contains(bubble) || !ids.has(id)) removeInlineAnnotationBubble(id);
+    });
+    const missing = annotations.filter(annotation => !inlineAnnotationBubbles.has(annotation.id));
+    if (!missing.length) return;
+    const index = buildArticleTextIndex(container);
+    // Resolve all ranges before inserting icons, which splits existing text nodes.
+    const placements = missing.map(annotation => ({
+        annotation,
+        range: findAnnotationRange(index, annotation, computeSectionPathFromNode)
+    }));
+    for (const { annotation, range } of placements) {
+        if (!range) continue;
+        insertInlineAnnotationBubble(range, pageName, annotation.sectionPath, annotation.id, annotation.opinion);
+    }
 }
 
 function clearAllInlineAnnotationBubbles() {
@@ -1065,7 +1099,10 @@ async function openAnnotationDialog(pageName: string, annotationId: string | nul
             } else {
                 const sentencePosKey = options.sentencePos
                     || computeSentenceOrderKey(selectionRange ? selectionRange.startContainer : null);
-                const created = createAnnotation(pageName, sectionPath, displaySentenceText, result.opinion, sentencePosKey);
+                const container = getArticleContentContainer();
+                const textAnchor = container && selectionRange
+                    ? captureAnnotationAnchor(buildArticleTextIndex(container), selectionRange) : undefined;
+                const created = createAnnotation(pageName, sectionPath, displaySentenceText, result.opinion, sentencePosKey, textAnchor);
                 insertInlineAnnotationBubble(selectionRange, pageName, sectionPath, created.id, result.opinion);
             }
         }
@@ -1216,6 +1253,7 @@ export function showAnnotationViewer(pageName: string) {
 
     const groups = buildAnnotationGroups(pageName);
     openAnnotationViewerDialog({
+        pageName,
         groups,
         onEditAnnotation: (annotationId, sectionPath) => {
             void openAnnotationDialog(pageName, annotationId, sectionPath);
@@ -1232,6 +1270,12 @@ export function showAnnotationViewer(pageName: string) {
             clearAllInlineAnnotationBubbles();
             updateAnnotationViewerDialogGroups(buildAnnotationGroups(pageName));
             return cleared;
+        },
+        onImportAnnotations: (json) => {
+            const imported = importAnnotations(pageName, json);
+            updateAnnotationViewerDialogGroups(buildAnnotationGroups(pageName));
+            restoreInlineAnnotationBubbles(pageName);
+            return imported;
         }
     });
 }
@@ -1241,14 +1285,7 @@ export function showAnnotationViewer(pageName: string) {
  * @param pageName {string} 條目標題
  */
 export function addMainPageReviewToolButtonsToDOM(pageName: string): void {
-    if (document.querySelector('#ca-annotate')) return;
-    // Add a single Vector menu tab to toggle annotation mode for the whole article
-    // This replaces per-heading mw-editsection buttons to avoid overlapping areas.
-    addVectorMenuTab('ca-annotate', state.convByVar({
-        hant: '批註模式', hans: '批注模式'
-    }), state.convByVar({
-        hant: '切換批註模式', hans: '切换批注模式'
-    }), () => toggleArticleAnnotationMode(pageName));
+    restoreInlineAnnotationBubbles(pageName);
     // add global viewer button (guard against duplicate)
     addGlobalAnnotationViewerButton(pageName);
     syncAnnotationModeMenuState(state.isAnnotationModeActive(ARTICLE_ANNOTATION_KEY), pageName);
@@ -1312,21 +1349,11 @@ function toggleArticleAnnotationMode(pageName: string): void {
         }
         console.log(`[ReviewTool] 條目「${state.articleTitle}」批註模式已啟用。`);
         // find main content container - prefer the parser output inside mw-content-text
-        const selectors = [
-            '#mw-content-text .mw-parser-output', '#mw-content-text', '.mw-parser-output', '#content', '#bodyContent'
-        ];
-        let container: Element | null = null;
-        for (const s of selectors) {
-            const el = document.querySelector(s);
-            if (el) {
-                container = el;
-                break;
-            }
-        }
+        const container = getArticleContentContainer();
         if (container) {
             console.log('[ReviewTool] chosen content container:', container.tagName, container.id || '(no id)', container.className || '(no class)');
         } else {
-            console.warn('[ReviewTool] could not find a content container with selectors', selectors);
+            console.warn('[ReviewTool] could not find an article content container');
         }
         if (!container) {
             console.warn('[ReviewTool] 未找到主要內容容器，無法啟用批註模式。');
@@ -1380,15 +1407,6 @@ function getReviewToolPortletLabel(isActive: boolean): string {
 }
 
 function syncAnnotationModeMenuState(isActive: boolean, pageName: string): void {
-    const tab = document.getElementById('ca-annotate');
-    if (tab) {
-        const span = tab.querySelector('a > span');
-        if (span && span instanceof HTMLElement) {
-            span.style.fontWeight = isActive ? 'bold' : 'normal';
-        }
-        tab.classList.toggle('selected', isActive);
-    }
-
     addPortletTrigger(REVIEWTOOL_PORTLET_ID, getReviewToolPortletLabel(isActive), () => {
         toggleArticleAnnotationMode(pageName);
     });

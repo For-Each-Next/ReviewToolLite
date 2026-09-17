@@ -1,5 +1,5 @@
 import state from "../state";
-import { AnnotationGroup, Annotation } from "../annotations";
+import { AnnotationGroup } from "../annotations";
 import {
     loadCodexAndVue,
     mountApp,
@@ -10,34 +10,17 @@ import {
 import AnnotationViewerDialog from "./components/annotation_viewer.vue";
 
 export interface AnnotationViewerDialogOptions {
+    pageName: string;
     groups: AnnotationGroup[];
     onEditAnnotation?: (annotationId: string, sectionPath: string) => void;
     onDeleteAnnotation?: (annotationId: string, sectionPath: string) => Promise<void> | void;
     onClearAllAnnotations?: () => Promise<boolean | void> | boolean | void;
+    onImportAnnotations?: (json: string) => Promise<number> | number;
 }
 
 type AnnotationViewerDialogVm = {
     open: boolean;
     groups: AnnotationGroup[];
-    deletingAnnotationId: string | null;
-    clearingAll: boolean;
-    canClearAll: boolean;
-    sortMethod: string;
-    isEmpty: boolean;
-    flattenedAnnotations: Annotation[];
-    sortingOptions: Array<{ value: string; label: string }>;
-    sortedGroups: AnnotationGroup[];
-    quotePreview: (text: string) => string;
-    formatTimestamp: (ts: number | undefined) => string;
-    handleEdit: (annotationId: string, sectionPath: string) => void;
-    handleDelete: (annotationId: string, sectionPath: string) => void;
-    handleClearAll: () => void;
-    handleExport: () => void;
-    buildPositionSortedGroups: () => AnnotationGroup[];
-    buildTimeSortedGroups: (order: 'asc' | 'desc') => AnnotationGroup[];
-    onUpdateOpen: (newValue: boolean) => void;
-    closeDialog: () => void;
-    $options: { i18n: Record<string, string> };
 };
 
 let viewerAppInstance: AnnotationViewerDialogVm | null = null;
@@ -64,10 +47,12 @@ export function updateAnnotationViewerDialogGroups(groups: AnnotationGroup[]): v
 
 export function openAnnotationViewerDialog(options: AnnotationViewerDialogOptions): void {
     viewerDialogOptions = {
+        pageName: options.pageName,
         groups: options.groups || [],
         onEditAnnotation: options.onEditAnnotation,
         onDeleteAnnotation: options.onDeleteAnnotation,
-        onClearAllAnnotations: options.onClearAllAnnotations
+        onClearAllAnnotations: options.onClearAllAnnotations,
+        onImportAnnotations: options.onImportAnnotations
     };
 
     if (getMountedApp()) removeDialogMount();
@@ -79,10 +64,15 @@ export function openAnnotationViewerDialog(options: AnnotationViewerDialogOption
                     return (Vue as unknown as { h: (comp: unknown, props: Record<string, unknown>) => unknown }).h(
                         AnnotationViewerDialog,
                         {
+                            ref: (instance: unknown) => {
+                                viewerAppInstance = instance as AnnotationViewerDialogVm | null;
+                            },
+                            pageName: viewerDialogOptions?.pageName || "",
                             initialGroups: viewerDialogOptions?.groups || [],
                             onEditAnnotation: viewerDialogOptions?.onEditAnnotation,
                             onDeleteAnnotation: viewerDialogOptions?.onDeleteAnnotation,
                             onClearAllAnnotations: viewerDialogOptions?.onClearAllAnnotations,
+                            onImportAnnotations: viewerDialogOptions?.onImportAnnotations,
                             onClosed: () => {
                                 viewerAppInstance = null;
                                 viewerDialogOptions = null;
@@ -93,7 +83,7 @@ export function openAnnotationViewerDialog(options: AnnotationViewerDialogOption
             });
 
             registerCodexComponents(app, Codex);
-            viewerAppInstance = mountApp(app) as AnnotationViewerDialogVm;
+            mountApp(app);
         })
         .catch((error: unknown) => {
             console.error("[ReviewTool] Failed to open annotation viewer dialog", error);

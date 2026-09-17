@@ -1,39 +1,4 @@
 /**
- * 創建 mw-editsection 風格的按鈕元素。
- * @param label {string} 按鈕標籤
- * @param title {string} 按鈕提示文字
- * @param onClick {(e: Event) => void} 按鈕點擊事件處理函數
- * @returns {HTMLElement} mw-editsection 風格的按鈕元素
- */
-import state from "../state";
-
-export function createMwEditSectionButton(label: string, title: string, onClick: (e: Event) => void): HTMLElement {
-    const button = document.createElement('a');
-    button.href = '#';
-    button.className = 'review-tool-button';
-    button.textContent = label;
-    button.setAttribute('title', title);
-    button.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick(e);
-    };
-
-    const leftBracket = document.createElement('span');
-    leftBracket.className = 'mw-editsection-bracket';
-    leftBracket.textContent = ' [';
-    const rightBracket = document.createElement('span');
-    rightBracket.className = 'mw-editsection-bracket';
-    rightBracket.textContent = ']';
-    const buttonGroup = document.createElement('span');
-    buttonGroup.className = 'review-tool-button-group';
-    buttonGroup.appendChild(leftBracket);
-    buttonGroup.appendChild(button);
-    buttonGroup.appendChild(rightBracket);
-    return buttonGroup;
-}
-
-/**
  * 在 mw-heading 元素中提取章節標題。
  * @param heading {Element} mw-heading 元素
  * @returns {string | null} 章節標題或 null
@@ -54,38 +19,6 @@ export function getHeadingTitle(heading: Element): string | null {
     // last resort: use the visible text
     const text = htmlHeading.textContent && htmlHeading.textContent.trim();
     return text || null;
-}
-
-/**
- * 在指定的 mw-heading 元素中附加按鈕。
- * @param heading {Element} mw-heading 元素
- * @param button {Element} 按鈕元素
- */
-export function appendButtonToHeading(heading: Element, button: Element): void {
-    const mwEditSection = heading.querySelector('.mw-editsection');
-    if (!mwEditSection) return;
-    // When appending the button, ensure its internal anchor will set the
-    // global `state.pendingReviewHeading` so dialogs know which heading invoked them.
-    try {
-        // find anchor inside provided button element
-        const anchor = (button.querySelector && button.querySelector('a')) || null;
-        if (anchor && typeof anchor.onclick === 'function') {
-            const orig = anchor.onclick;
-            anchor.onclick = (e: Event) => {
-                try { state.pendingReviewHeading = heading; } catch (err) { console.error('[ReviewTool][appendButtonToHeading] failed to set pendingReviewHeading', err); throw err; }
-                // call original handler
-                try { orig.call(anchor, e); } catch (ex) { console.error('[ReviewTool][appendButtonToHeading] original click handler failed', ex); throw ex; }
-            };
-        } else if (anchor) {
-            anchor.addEventListener('click', () => {
-                try { state.pendingReviewHeading = heading; } catch (err) { console.error('[ReviewTool][appendButtonToHeading] failed to set pendingReviewHeading', err); throw err; }
-            });
-        }
-    } catch (e) {
-        console.error('[ReviewTool][appendButtonToHeading] failed to append button or import state', e);
-        throw e;
-    }
-    mwEditSection.append(button);
 }
 
 /**

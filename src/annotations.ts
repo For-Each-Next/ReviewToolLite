@@ -1,5 +1,11 @@
 import state from './state';
 
+export interface AnnotationTextAnchor {
+    start: number;
+    end: number;
+    quote: string;
+}
+
 export interface Annotation {
     id: string;
     sectionPath: string;
@@ -9,6 +15,7 @@ export interface Annotation {
     createdBy: string;
     createdAt: number;
     resolved?: boolean;
+    textAnchor?: AnnotationTextAnchor;
 }
 
 export interface AnnotationStore {
@@ -70,6 +77,13 @@ function normalizeAnnotation(anno: unknown): Annotation | null {
 
     const sentencePos = typeof anno.sentencePos === 'string' ? anno.sentencePos : '';
     const resolved = typeof anno.resolved === 'boolean' ? anno.resolved : undefined;
+    const anchor = isRecord(anno.textAnchor) ? anno.textAnchor : null;
+    const textAnchor = anchor
+        && typeof anchor.start === 'number' && Number.isInteger(anchor.start) && anchor.start >= 0
+        && typeof anchor.end === 'number' && Number.isInteger(anchor.end) && anchor.end > anchor.start
+        && typeof anchor.quote === 'string' && anchor.quote.length === anchor.end - anchor.start
+        ? { start: anchor.start, end: anchor.end, quote: anchor.quote }
+        : undefined;
 
     return {
         id: anno.id,
@@ -79,7 +93,8 @@ function normalizeAnnotation(anno: unknown): Annotation | null {
         opinion: anno.opinion,
         createdBy: anno.createdBy,
         createdAt: anno.createdAt,
-        resolved
+        resolved,
+        textAnchor
     };
 }
 
@@ -146,14 +161,14 @@ export function loadAnnotations(pageName: string): AnnotationStore {
     return normalized;
 }
 
-export function saveAnnotations(store: AnnotationStore): void {
+export function saveAnnotations(store: AnnotationStore): boolean {
     const key = storageKeyForPage(store.pageName);
     const payload = JSON.stringify(store);
     const localStore = getStorage('local');
     if (localStore) {
         try {
             localStore.setItem(key, payload);
-            return;
+            return true;
         } catch (e) {
             console.error('[ReviewTool] failed to save annotations to localStorage', e);
         }
@@ -163,12 +178,59 @@ export function saveAnnotations(store: AnnotationStore): void {
     if (sessionStore) {
         try {
             sessionStore.setItem(key, payload);
+            // A stale local copy would otherwise take precedence over the fallback.
+            localStore?.removeItem(key);
+            return true;
         } catch (e) {
             console.error('[ReviewTool] failed to save annotations to sessionStorage fallback', e);
         }
     } else {
         console.error('[ReviewTool] no available storage to save annotations');
     }
+    return false;
+}
+
+/** Import a JSON backup into the current article without replacing existing annotations. */
+export function importAnnotations(pageName: string, json: string): number {
+    const payload: unknown = JSON.parse(json.replace(/^\uFEFF/, ''));
+    if (!isRecord(payload)) throw new Error('Invalid annotation backup');
+
+    let entries: unknown[];
+    if (Array.isArray(payload.groups)) {
+        entries = [];
+        for (const group of payload.groups) {
+            if (!isRecord(group) || !Array.isArray(group.annotations)) {
+                throw new Error('Invalid annotation group');
+            }
+            for (const entry of group.annotations as unknown[]) entries.push(entry);
+        }
+    } else if (Array.isArray(payload.annotations)) {
+        entries = payload.annotations;
+    } else {
+        throw new Error('Missing annotations in backup');
+    }
+
+    // Validate the whole backup before changing storage.
+    const annotations = entries.map(entry => {
+        const annotation = normalizeAnnotation(entry);
+        if (!annotation || !annotation.id.trim() || !Number.isFinite(annotation.createdAt)) {
+            throw new Error('Invalid annotation in backup');
+        }
+        return annotation;
+    });
+    const store = loadAnnotations(pageName);
+    const ids = new Set(store.annotations.map(annotation => annotation.id));
+    let imported = 0;
+    for (const annotation of annotations) {
+        if (ids.has(annotation.id)) continue;
+        ids.add(annotation.id);
+        store.annotations.push(annotation);
+        imported++;
+    }
+    if (imported && !saveAnnotations({ ...store, pageName })) {
+        throw new Error('Unable to save imported annotations');
+    }
+    return imported;
 }
 
 export function createAnnotation(
@@ -176,7 +238,8 @@ export function createAnnotation(
     sectionPath: string,
     sentenceText: string,
     opinion: string,
-    sentencePos = ''
+    sentencePos = '',
+    textAnchor?: AnnotationTextAnchor
 ): Annotation {
     const store = loadAnnotations(pageName);
     const normalizedSectionPath = sectionPath === '目次' ? '序言' : sectionPath;
@@ -188,7 +251,8 @@ export function createAnnotation(
         opinion,
         createdBy: state.userName || 'unknown',
         createdAt: Date.now(),
-        resolved: false
+        resolved: false,
+        textAnchor
     };
     store.annotations.push(anno);
     saveAnnotations(store);
