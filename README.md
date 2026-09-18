@@ -1,58 +1,54 @@
-# ReviewTool
+# ReviewToolLite
 
-專案頁面：[ReviewTool](https://zh.wikipedia.org/wiki/User:SuperGrey/gadgets/ReviewTool)
+ReviewToolLite 是 [SuperGrey][1] 開發之中文維基百科評審工具 [ReviewTool][2] 的精簡版。
+Lite 版移除了「評審管理」工具，僅保留條目頁的「批註模式」。評審者可逐句標記評語，並將意見複製
+為wikitext，貼到任何需要的地方，再依需要微調。
 
-條目文筆批註小工具，僅在條目頁提供批註功能。
+## 修改內容
 
-- 在條目頁的「更多／工具」選單中開啟「批註模式」後，選擇文字進行批註。
-- 批註本地儲存於瀏覽器中，暫不具備同步功能。在「批註列表」底部開啟「匯入／匯出」選單，選擇「匯出」備份為 JSON 檔，或選擇「匯入」將備份合併到目前條目；重複 ID 的批註會略過，保留現有內容。匯入後會立即更新列表及可定位的批註圖示。
-- 「批註列表」底部的排序、複製、複製並前往、匯入／匯出、清除全部及關閉控制項會一直顯示；沒有批註時，需要批註的操作（包括「匯出」選單項目）會停用，仍可開啟「匯入／匯出」選單匯入備份。
-- 重新載入條目頁後，會依儲存的位置及原文還原批註圖示；圖示僅在開啟批註模式時顯示，可點擊檢視或編輯。原文不匹配時不顯示圖示，批註仍保留在本地；舊批註會嘗試以原文及章節定位。
-- 在「查看批註」列表中，使用「複製」按鈕可直接複製本頁批註的評審維基語法；使用藍色主要按鈕「複製並前往」選擇典範條目評選、特色列表評選、優良條目評選或同行評審，複製成功後會前往該頁以本條目為標題的章節。
-- 複製的文字中，每項意見使用 `# ...` 編號列表，保留章節、原文引用及簽名，批註依條目位置排序。
-- 意見中以 `*` 開頭的各行（星號後可有或無空格）會轉為 `#* ...` 子意見，列在原文引用下方。
-- 在批註意見輸入框中輸入 `<<文字>>`，會即時替換為 `「{{仿宋体|1=文字}}」`。
-- 在意見輸入框中按 Enter，會將原意見加上 `* `，並自動在新行插入 `* `，方便繼續輸入下一項子意見。
+- **匯入與匯出備份**：在批註列表的「匯入／匯出」選單中，可將批註匯出為 JSON 檔案，
+  或把備份匯入目前條目。
+- **直接複製評審文字**：在批註列表中點選「複製」，即可取得整理好的評審維基語法，
+  貼到評審頁後再自行修改。
+- **複製且前往評審頁**：透過「複製並前往」，可選擇典範條目評選、特色列表評選、
+  優良條目評選或同行評審。複製成功後，便會前往所選頁面中以本條目為標題的章節。
+- **排版捷徑**：輸入 `<<文字>>`，會自動轉為 `「{{仿宋体|1=文字}}」`。
+- **子点列评注**：在已有文字的意見行末按 Enter，會為上一行補上 `* ` 標記，就同一句
+  话形成缩进点列批注。
 
-## 使用方式
+批註儲存在目前使用的瀏覽器中，不會自動同步到其他裝置。
+如需備份或轉移，可使用 JSON 匯出與匯入功能。
 
-### 發行版本
+## 建構與使用
 
-将如下程式碼复制至 [User:你的用戶名/common.js](https://zh.wikipedia.org/wiki/Special:MyPage/common.js) 頁面：
+先安裝 Git、[Node.js][3] 和 npm，再執行以下指令：
 
-```js
-importScript('User:SuperGrey/gadgets/ReviewTool/main.js');  // Backlink: [[User:SuperGrey/gadgets/ReviewTool]]
+```sh
+git clone https://github.com/For-Each-Next/ReviewToolLite.git
+cd ReviewToolLite
+npm ci
+npm run release
 ```
 
-### 從原始碼建構
+完成後會產生 `dist/bundled.js`。複製這個檔案的完整內容，
+可選擇以下任一方式在中文維基百科啟動工具：
 
-1. **安裝 Node.js**
-   - 請先安裝 [Node.js](https://nodejs.org/)。
+- **加入用戶 JS**：將腳本內容附加到自己的 [common.js][4] 頁面並儲存，
+  再重新載入條目頁。
+- **用 F12 臨時啟動**：在條目頁按 F12 開啟瀏覽器開發者工具，
+  切換到 Console（主控台），貼上腳本內容並執行。
+  這種方式只在目前頁面生效，重新載入或切換頁面後需要再次執行。
 
-2. **安裝依賴套件**
-   - 在 ReviewTool 目錄下執行：
+啟動後，在「更多／工具」選單中開啟「批註模式」，即可選取文字並新增批註。
+點選「查看批註」可開啟列表，編輯、刪除、備份或複製批註。
 
-     ```sh
-     npm install
-     ```
+開發時可執行以下指令，在檔案變動後自動重新建構：
 
-3. **建構 Bundled 版本**
-   - 執行下列指令以產生 `dist/bundled.js`：
+```sh
+npm run watch
+```
 
-     ```sh
-     npm run release
-     ```
-
-   - 若需持續監看檔案變動並自動重建，請執行：
-
-     ```sh
-     npm run watch
-     ```
-
-4. **安裝至維基**
-   - 將 `dist/bundled.js` 上傳至你的維基用戶頁面，例如 [User:你的用戶名/ReviewTool.js](https://zh.wikipedia.org/wiki/Special:MyPage/ReviewTool.js)。
-   - 在 [User:你的用戶名/common.js](https://zh.wikipedia.org/wiki/Special:MyPage/common.js) 頁面加入：
-
-     ```js
-     importScript('User:你的用戶名/ReviewTool.js');  // 修改為你的用戶名
-     ```
+[1]: https://zh.wikipedia.org/wiki/User:SuperGrey
+[2]: https://zh.wikipedia.org/wiki/User:SuperGrey/gadgets/ReviewTool
+[3]: https://nodejs.org/
+[4]: https://zh.wikipedia.org/wiki/Special:MyPage/common.js

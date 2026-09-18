@@ -1,0 +1,70 @@
+name: Build and release
+
+on:
+    push:
+        branches: [main]
+        tags: ['v*']
+    pull_request:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: '24'
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run tests
+              run: npm test
+
+            - name: Build JavaScript
+              run: npm run release
+
+            - name: Upload JavaScript
+              uses: actions/upload-artifact@v7
+              with:
+                  name: ReviewToolLite
+                  path: dist/bundled.js
+                  if-no-files-found: error
+
+    release:
+        if: >-
+            github.event_name == 'push' &&
+            startsWith(github.ref, 'refs/tags/v')
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/download-artifact@v8
+              with:
+                  name: ReviewToolLite
+                  path: dist
+
+            - name: Publish release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  RELEASE_TAG: ${{ github.ref_name }}
+              run: |
+                  flags=()
+                  if [[ "$RELEASE_TAG" == *-* ]]; then
+                      flags+=(--prerelease)
+                  fi
+                  gh release create "$RELEASE_TAG" dist/bundled.js \
+                      --verify-tag \
+                      --generate-notes \
+                      --title "ReviewToolLite $RELEASE_TAG" \
+                      "${flags[@]}"

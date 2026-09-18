@@ -127,8 +127,8 @@ const buildOptions = {
         '.vue': 'ts'
     },
     banner: {
-        js: `// [[User:SuperGrey/gadgets/ReviewTool]]
-// Repository: https://github.com/QZGao/ReviewTool
+        js: `// ReviewToolLite (based on [[User:SuperGrey/gadgets/ReviewTool]])
+// Repository: https://github.com/For-Each-Next/ReviewToolLite
 // Release: ${pkgJson.version}
 // Timestamp: ${new Date().toISOString()}
 // <nowiki>`
