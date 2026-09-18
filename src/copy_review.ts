@@ -43,10 +43,22 @@ export async function copyWritingReview(groups: AnnotationGroup[]): Promise<bool
     }
 
     try {
+        const revisionId = mw.config.get('wgRevisionId');
+        if (!revisionId) throw new Error('Missing article revision ID');
+        await mw.loader.using('mediawiki.api');
+        const response = await new mw.Api().get({
+            action: 'query',
+            prop: 'revisions',
+            revids: revisionId,
+            rvprop: 'timestamp',
+            formatversion: 2
+        }) as { query?: { pages?: { revisions?: { timestamp?: string }[] }[] } };
+        const revisionTimestamp = response.query?.pages?.[0]?.revisions?.[0]?.timestamp;
+        if (!revisionTimestamp) throw new Error('Missing article revision timestamp');
         await copyText(buildWritingReviewWikitext(chapters, {
             articleTitle: mw.config.get('wgPageName') || state.articleTitle,
-            revisionId: mw.config.get('wgRevisionId'),
-            revisionTimestamp: mw.config.get('wgRevisionTimestamp') || mw.config.get('wgCurRevisionTimestamp')
+            revisionId,
+            revisionTimestamp
         }).trim());
         mw.notify(state.convByVar({
             hant: '已複製評審文字，可貼到評審頁。', hans: '已复制评审文本，可粘贴到评审页。'
@@ -55,8 +67,8 @@ export async function copyWritingReview(groups: AnnotationGroup[]): Promise<bool
     } catch (error) {
         console.error('[ReviewTool] Failed to copy review text', error);
         mw.notify(state.convByVar({
-            hant: '無法複製評審文字，請允許瀏覽器存取剪貼簿後重試。',
-            hans: '无法复制评审文本，请允许浏览器访问剪贴板后重试。'
+            hant: '無法複製評審文字，請檢查網路連線及剪貼簿權限後重試。',
+            hans: '无法复制评审文本，请检查网络连接及剪贴板权限后重试。'
         }), { type: 'error', tag: 'review-tool' });
         return false;
     }

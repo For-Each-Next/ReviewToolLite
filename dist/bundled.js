@@ -1,7 +1,7 @@
 // [[User:SuperGrey/gadgets/ReviewTool]]
 // Repository: https://github.com/QZGao/ReviewTool
 // Release: 1.0.1
-// Timestamp: 2026-09-17T12:25:02.713Z
+// Timestamp: 2026-09-18T14:15:02.774Z
 // <nowiki>
 (() => {
   var __defProp = Object.defineProperty;
@@ -981,9 +981,9 @@
     }).join("");
   }
   function formatRevisionLabel(timestamp) {
-    const date = timestamp ? new Date(timestamp) : /* @__PURE__ */ new Date();
-    if (Number.isNaN(date.getTime())) return "";
-    return "".concat(date.getMonth() + 1, "月").concat(date.getDate(), "日 ").concat(String(date.getHours()).padStart(2, "0"), ":").concat(String(date.getMinutes()).padStart(2, "0"), "版");
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) throw new Error("Invalid revision timestamp");
+    return "".concat(date.getUTCFullYear(), "年").concat(date.getUTCMonth() + 1, "月").concat(date.getUTCDate(), "日 ").concat(String(date.getUTCHours()).padStart(2, "0"), ":").concat(String(date.getUTCMinutes()).padStart(2, "0"));
   }
   function buildWritingReviewWikitext(chapters, context) {
     let wikitext = "";
@@ -991,7 +991,7 @@
       const title = (chapter.title || "").trim();
       const sectionLink = "[[".concat(context.articleTitle, "#").concat(title, "|").concat(title, "]]");
       const permalink = "[[Special:PermaLink/".concat(context.revisionId, "#").concat(title, "|").concat(formatRevisionLabel(context.revisionTimestamp), "]]");
-      wikitext += "'''".concat(sectionLink, "'''<small>（").concat(permalink, "）</small>\n");
+      wikitext += "'''".concat(sectionLink, "'''<small>（基于").concat(permalink, "版）</small>\n");
       for (const item of chapter.suggestions) {
         const quote = (item.quote || "").trim();
         const suggestion = formatSuggestion(item.suggestion || "");
@@ -1031,6 +1031,7 @@
     }
   }
   async function copyWritingReview(groups) {
+    var _a, _b, _c, _d, _e;
     const chapters = buildWritingReviewChapters(groups, state_default.convByVar({
       hant: "（未指定章節）",
       hans: "（未指定章节）"
@@ -1043,10 +1044,22 @@
       return false;
     }
     try {
+      const revisionId = mw.config.get("wgRevisionId");
+      if (!revisionId) throw new Error("Missing article revision ID");
+      await mw.loader.using("mediawiki.api");
+      const response = await new mw.Api().get({
+        action: "query",
+        prop: "revisions",
+        revids: revisionId,
+        rvprop: "timestamp",
+        formatversion: 2
+      });
+      const revisionTimestamp = (_e = (_d = (_c = (_b = (_a = response.query) == null ? void 0 : _a.pages) == null ? void 0 : _b[0]) == null ? void 0 : _c.revisions) == null ? void 0 : _d[0]) == null ? void 0 : _e.timestamp;
+      if (!revisionTimestamp) throw new Error("Missing article revision timestamp");
       await copyText(buildWritingReviewWikitext(chapters, {
         articleTitle: mw.config.get("wgPageName") || state_default.articleTitle,
-        revisionId: mw.config.get("wgRevisionId"),
-        revisionTimestamp: mw.config.get("wgRevisionTimestamp") || mw.config.get("wgCurRevisionTimestamp")
+        revisionId,
+        revisionTimestamp
       }).trim());
       mw.notify(state_default.convByVar({
         hant: "已複製評審文字，可貼到評審頁。",
@@ -1056,8 +1069,8 @@
     } catch (error) {
       console.error("[ReviewTool] Failed to copy review text", error);
       mw.notify(state_default.convByVar({
-        hant: "無法複製評審文字，請允許瀏覽器存取剪貼簿後重試。",
-        hans: "无法复制评审文本，请允许浏览器访问剪贴板后重试。"
+        hant: "無法複製評審文字，請檢查網路連線及剪貼簿權限後重試。",
+        hans: "无法复制评审文本，请检查网络连接及剪贴板权限后重试。"
       }), { type: "error", tag: "review-tool" });
       return false;
     }

@@ -44,13 +44,13 @@ function formatSuggestion(suggestion: string): string {
 export type WritingReviewLinkContext = {
     articleTitle: string;
     revisionId: number;
-    revisionTimestamp?: string;
+    revisionTimestamp: string;
 };
 
-function formatRevisionLabel(timestamp?: string): string {
-    const date = timestamp ? new Date(timestamp) : new Date();
-    if (Number.isNaN(date.getTime())) return '';
-    return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}版`;
+function formatRevisionLabel(timestamp: string): string {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) throw new Error('Invalid revision timestamp');
+    return `${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月${date.getUTCDate()}日 ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 export function buildWritingReviewWikitext(chapters: WritingReviewChapter[], context: WritingReviewLinkContext): string {
@@ -59,7 +59,7 @@ export function buildWritingReviewWikitext(chapters: WritingReviewChapter[], con
         const title = (chapter.title || '').trim();
         const sectionLink = `[[${context.articleTitle}#${title}|${title}]]`;
         const permalink = `[[Special:PermaLink/${context.revisionId}#${title}|${formatRevisionLabel(context.revisionTimestamp)}]]`;
-        wikitext += `'''${sectionLink}'''<small>（${permalink}）</small>\n`;
+        wikitext += `'''${sectionLink}'''<small>（基于${permalink}版）</small>\n`;
         for (const item of chapter.suggestions) {
             const quote = (item.quote || '').trim();
             const suggestion = formatSuggestion(item.suggestion || '');
