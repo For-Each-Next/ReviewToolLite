@@ -1,5 +1,14 @@
-// global.d.ts at package root - allow importing CSS files as strings
 declare module '*.css' {
     const content: string;
     export default content;
+}
+
+declare module '*.vue' {
+    const component: import('vue').Component;
+    export default component;
+}
+
+interface Window {
+    RLQ?: { push(callback: () => void): unknown };
+    Vue?: import('./src/dialog').VueModule;
 }

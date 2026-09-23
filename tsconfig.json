@@ -1,10 +1,10 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2019",
     "module": "ESNext",
     "moduleResolution": "Node",
     "lib": [
-      "ES2017",
+      "ES2019",
       "DOM"
     ],
     "esModuleInterop": true,
@@ -14,7 +14,7 @@
     "types": [
       "@types/node",
       "types-mediawiki"
-    ],
+    ]
   },
   "include": [
     "src/**/*.ts",

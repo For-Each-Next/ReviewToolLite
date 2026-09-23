@@ -1,3 +1,4 @@
+import { groupAnnotations } from './annotation_order';
 import state from './state';
 
 export interface AnnotationTextAnchor {
@@ -14,6 +15,7 @@ export interface Annotation {
     opinion: string;
     createdBy: string;
     createdAt: number;
+    updatedAt?: number;
     resolved?: boolean;
     textAnchor?: AnnotationTextAnchor;
 }
@@ -22,6 +24,7 @@ export interface AnnotationStore {
     pageName: string;
     createdAt: number;
     annotations: Annotation[];
+    clearedAnnotations?: Annotation[];
 }
 
 export interface AnnotationGroup {
@@ -32,7 +35,7 @@ export interface AnnotationGroup {
 const KEY_PREFIX = 'reviewtool:annotations:';
 
 function storageKeyForPage(pageName: string): string {
-    return KEY_PREFIX + (pageName || 'unknown');
+    return `${KEY_PREFIX}${pageName || 'unknown'}`;
 }
 
 function getStorage(type: 'local' | 'session'): Storage | null {
@@ -93,6 +96,8 @@ function normalizeAnnotation(anno: unknown): Annotation | null {
         opinion: anno.opinion,
         createdBy: anno.createdBy,
         createdAt: anno.createdAt,
+        updatedAt: typeof anno.updatedAt === 'number' && Number.isFinite(new Date(anno.updatedAt).getTime())
+            && anno.updatedAt >= anno.createdAt ? anno.updatedAt : undefined,
         resolved,
         textAnchor
     };
@@ -140,13 +145,16 @@ export function loadAnnotations(pageName: string): AnnotationStore {
         ? parsedRecord.annotations
         : [];
     const annotations = parsedAnnotations
-        .map((anno) => normalizeAnnotation(anno))
+        .map(normalizeAnnotation)
         .filter((anno): anno is Annotation => !!anno);
 
     const normalized: AnnotationStore = {
         pageName: typeof parsedRecord?.pageName === 'string' ? parsedRecord.pageName : pageName,
         createdAt: typeof parsedRecord?.createdAt === 'number' ? parsedRecord.createdAt : Date.now(),
-        annotations
+        annotations,
+        clearedAnnotations: Array.isArray(parsedRecord?.clearedAnnotations)
+            ? parsedRecord.clearedAnnotations.map(normalizeAnnotation).filter((anno): anno is Annotation => !!anno)
+            : undefined
     };
 
     if (source === 'session' && localStore) {
@@ -277,7 +285,7 @@ export function updateAnnotation(
     const store = loadAnnotations(pageName);
     const idx = store.annotations.findIndex(a => a.id === id);
     if (idx === -1) return null;
-    const updated = { ...store.annotations[idx], ...updates } as Annotation;
+    const updated = { ...store.annotations[idx], ...updates, updatedAt: Date.now() };
     store.annotations[idx] = updated;
     saveAnnotations(store);
     return updated;
@@ -295,30 +303,37 @@ export function deleteAnnotation(pageName: string, id: string): boolean {
 }
 
 export function clearAnnotations(pageName: string): boolean {
-    const key = storageKeyForPage(pageName);
-    const localStore = getStorage('local');
-    const sessionStore = getStorage('session');
-    let removed = false;
-
-    if (localStore) {
-        try {
-            if (localStore.getItem(key) !== null) removed = true;
-            localStore.removeItem(key);
-        } catch (e) {
-            console.error('[ReviewTool] failed to clear annotations from localStorage', e);
-        }
+    const store = loadAnnotations(pageName);
+    if (!store.annotations.length) return false;
+    // Save the empty list and its undo copy together; a failed write leaves comments intact.
+    if (!saveAnnotations({ ...store, pageName, annotations: [], clearedAnnotations: store.annotations })) {
+        throw new Error('Unable to clear annotations');
     }
+    return true;
+}
 
-    if (sessionStore) {
-        try {
-            if (sessionStore.getItem(key) !== null) removed = true;
-            sessionStore.removeItem(key);
-        } catch (e) {
-            console.error('[ReviewTool] failed to clear annotations from sessionStorage', e);
-        }
+export function canUndoClearAnnotations(pageName: string): boolean {
+    return Boolean(loadAnnotations(pageName).clearedAnnotations?.length);
+}
+
+export function undoClearAnnotations(pageName: string): number {
+    const store = loadAnnotations(pageName);
+    if (!store.clearedAnnotations?.length) return 0;
+    const ids = new Set(store.annotations.map(annotation => annotation.id));
+    const restored = store.clearedAnnotations.filter(annotation => {
+        if (ids.has(annotation.id)) return false;
+        ids.add(annotation.id);
+        return true;
+    });
+    if (!saveAnnotations({
+        ...store,
+        pageName,
+        annotations: [...store.annotations, ...restored],
+        clearedAnnotations: undefined
+    })) {
+        throw new Error('Unable to restore cleared annotations');
     }
-
-    return removed;
+    return restored.length;
 }
 
 function sortAnnotationsByTimestamp(list: Annotation[]): Annotation[] {
@@ -331,26 +346,10 @@ export function buildAnnotationGroups(pageName: string): AnnotationGroup[] {
         return [];
     }
 
-    const buckets = new Map<string, Annotation[]>();
-    for (const anno of store.annotations) {
-        const key = typeof anno.sectionPath === 'string' && anno.sectionPath.trim()
-            ? anno.sectionPath.trim()
-            : '';
-        const existing = buckets.get(key);
-        if (existing) {
-            existing.push(anno);
-        } else {
-            buckets.set(key, [anno]);
-        }
-    }
-
-    const groups: AnnotationGroup[] = [];
-    for (const [sectionPath, annotations] of buckets.entries()) {
-        groups.push({
-            sectionPath,
-            annotations: sortAnnotationsByTimestamp(annotations)
-        });
-    }
+    const groups = groupAnnotations(store.annotations).map(group => ({
+        ...group,
+        annotations: sortAnnotationsByTimestamp(group.annotations)
+    }));
 
     groups.sort((a, b) => {
         const aTs = a.annotations[0]?.createdAt ?? Number.MAX_SAFE_INTEGER;

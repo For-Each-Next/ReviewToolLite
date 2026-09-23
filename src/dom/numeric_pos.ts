@@ -20,7 +20,7 @@ function resolveRoot(root?: Element | string): Element | null {
 
 function countPreviousElementSiblings(node: Element | null): number {
     let index = 0;
-    let sibling = node ? node.previousElementSibling : null;
+    let sibling = node?.previousElementSibling ?? null;
     while (sibling) {
         index++;
         sibling = sibling.previousElementSibling;
@@ -57,9 +57,11 @@ export function pathArrayToKey(path: PathArray | null, paddingWidth = DEFAULT_PA
         .join('.');
 }
 
-export function getElementOrderKey(element: Element | null, options?: OrderKeyOptions): string | null {
-    const path = getElementPathArray(element, options?.root ?? DEFAULT_ROOT_SELECTOR);
-    return pathArrayToKey(path, options?.paddingWidth ?? DEFAULT_PADDING);
+export function getElementOrderKey(
+    element: Element | null,
+    { root = DEFAULT_ROOT_SELECTOR, paddingWidth = DEFAULT_PADDING }: OrderKeyOptions = {}
+): string | null {
+    return pathArrayToKey(getElementPathArray(element, root), paddingWidth);
 }
 
 export function compareOrderKeys(a?: string | null, b?: string | null): number {
@@ -67,8 +69,8 @@ export function compareOrderKeys(a?: string | null, b?: string | null): number {
     if (!a) return -1;
     if (!b) return 1;
 
-    const partsA = a.split('.').map((part) => parseInt(part, 10));
-    const partsB = b.split('.').map((part) => parseInt(part, 10));
+    const partsA = a.split('.').map((part) => Number.parseInt(part, 10));
+    const partsB = b.split('.').map((part) => Number.parseInt(part, 10));
     const len = Math.min(partsA.length, partsB.length);
 
     for (let i = 0; i < len; i++) {
@@ -79,4 +81,3 @@ export function compareOrderKeys(a?: string | null, b?: string | null): number {
 
     return partsA.length - partsB.length;
 }
-

@@ -1,11 +1,8 @@
-// Module responsible for dialog-related side effects (loader, mount element, mounting)
-type VueModule = {
-    createMwApp: (options: unknown) => VueApp;
-};
+import type { App, Component } from 'vue';
 
-type VueApp = {
-    mount: (selector: string) => unknown;
-    component?: (name: string, value: unknown) => VueApp;
+export type VueApp = Pick<App, 'mount' | 'unmount' | 'component'>;
+export type VueModule = typeof import('vue') & {
+    createMwApp: (options: Component) => VueApp;
 };
 
 type CodexModule = Partial<{
@@ -16,12 +13,11 @@ type CodexModule = Partial<{
     CdxTextArea: unknown;
 }>;
 
-let _mountedApp: VueApp | null = null;
-let _mountedRoot: unknown = null;
-let _imeListenersInstalled = false;
-let _isImeComposing = false;
-let _imeResetTimer: number | null = null;
-let _lastCompositionAt = 0;
+let mountedApp: VueApp | null = null;
+let imeListenersInstalled = false;
+let isImeComposing = false;
+let imeResetTimer: number | null = null;
+let lastCompositionAt = 0;
 
 /**
  * Helper to determine if an event target is an editable element that may be using IME, for the purpose of guarding Escape key behavior during composition.
@@ -40,26 +36,26 @@ function isEditableEventTarget(target: EventTarget | null): boolean {
  * Mark IME composition as active.
  */
 function onCompositionStart(): void {
-    if (_imeResetTimer !== null) {
-        window.clearTimeout(_imeResetTimer);
-        _imeResetTimer = null;
+    if (imeResetTimer !== null) {
+        window.clearTimeout(imeResetTimer);
+        imeResetTimer = null;
     }
-    _isImeComposing = true;
-    _lastCompositionAt = Date.now();
+    isImeComposing = true;
+    lastCompositionAt = Date.now();
 }
 
 /**
  * Reset IME composition state when composition ends.
  */
 function onCompositionEnd(): void {
-    _lastCompositionAt = Date.now();
+    lastCompositionAt = Date.now();
     // Keep composition active briefly to absorb Esc cancel timing differences across browsers/IMEs.
-    if (_imeResetTimer !== null) {
-        window.clearTimeout(_imeResetTimer);
+    if (imeResetTimer !== null) {
+        window.clearTimeout(imeResetTimer);
     }
-    _imeResetTimer = window.setTimeout(() => {
-        _isImeComposing = false;
-        _imeResetTimer = null;
+    imeResetTimer = window.setTimeout(() => {
+        isImeComposing = false;
+        imeResetTimer = null;
     }, 80);
 }
 
@@ -69,9 +65,9 @@ function onCompositionEnd(): void {
  */
 function onCompositionInput(event: InputEvent): void {
     const inputType = typeof event.inputType === 'string' ? event.inputType : '';
-    if (event.isComposing || inputType.indexOf('insertComposition') === 0) {
-        _lastCompositionAt = Date.now();
-        _isImeComposing = true;
+    if (event.isComposing || inputType.startsWith('insertComposition')) {
+        lastCompositionAt = Date.now();
+        isImeComposing = true;
     }
 }
 
@@ -80,8 +76,8 @@ function onCompositionInput(event: InputEvent): void {
  * @returns {boolean} True when composition should still suppress Escape-driven dialog close.
  */
 function isCompositionLikelyActive(): boolean {
-    if (_isImeComposing) return true;
-    return Date.now() - _lastCompositionAt <= 500;
+    if (isImeComposing) return true;
+    return Date.now() - lastCompositionAt <= 500;
 }
 
 /**
@@ -119,7 +115,7 @@ function onDialogCancel(event: Event): void {
  * This should be called when any dialog is opened to ensure proper handling of Escape key during IME input.
  */
 function installImeEscGuard(): void {
-    if (_imeListenersInstalled) return;
+    if (imeListenersInstalled) return;
     window.addEventListener('compositionstart', onCompositionStart, true);
     window.addEventListener('compositionend', onCompositionEnd, true);
     window.addEventListener('beforeinput', onCompositionInput, true);
@@ -127,7 +123,7 @@ function installImeEscGuard(): void {
     window.addEventListener('keydown', onEscapeKey, true);
     window.addEventListener('keyup', onEscapeKey, true);
     window.addEventListener('cancel', onDialogCancel, true);
-    _imeListenersInstalled = true;
+    imeListenersInstalled = true;
 }
 
 /**
@@ -135,7 +131,7 @@ function installImeEscGuard(): void {
  * This should be called when dialogs are closed to clean up event listeners.
  */
 function removeImeEscGuard(): void {
-    if (!_imeListenersInstalled) return;
+    if (!imeListenersInstalled) return;
     window.removeEventListener('compositionstart', onCompositionStart, true);
     window.removeEventListener('compositionend', onCompositionEnd, true);
     window.removeEventListener('beforeinput', onCompositionInput, true);
@@ -143,89 +139,74 @@ function removeImeEscGuard(): void {
     window.removeEventListener('keydown', onEscapeKey, true);
     window.removeEventListener('keyup', onEscapeKey, true);
     window.removeEventListener('cancel', onDialogCancel, true);
-    if (_imeResetTimer !== null) {
-        window.clearTimeout(_imeResetTimer);
-        _imeResetTimer = null;
+    if (imeResetTimer !== null) {
+        window.clearTimeout(imeResetTimer);
+        imeResetTimer = null;
     }
-    _imeListenersInstalled = false;
-    _isImeComposing = false;
-    _lastCompositionAt = 0;
+    imeListenersInstalled = false;
+    isImeComposing = false;
+    lastCompositionAt = 0;
 }
 
-/**
- * Load Codex and Vue modules.
- * @returns {JQuery.Promise<{ Vue: VueModule, Codex: CodexModule }>} A promise that resolves with the loaded modules.
- */
-export function loadCodexAndVue(): JQuery.Promise<{ Vue: VueModule, Codex: CodexModule }> {
-    return mw.loader.using('@wikimedia/codex').then((requireFn: (name: string) => unknown) => {
-        const Vue = requireFn('vue') as VueModule;
-        const Codex = requireFn('@wikimedia/codex') as CodexModule;
-        if (typeof window !== 'undefined' && !(window as unknown as { Vue?: VueModule }).Vue) {
-            (window as unknown as { Vue?: VueModule }).Vue = Vue;
-        }
-        return { Vue, Codex };
-    });
+const MOUNT_ID = 'review-tool-dialog-mount';
+const CLOSE_DELAY_MS = 200;
+
+export async function loadCodexAndVue(): Promise<{ Vue: VueModule; Codex: CodexModule }> {
+    const requireModule = await mw.loader.using('@wikimedia/codex');
+    const Vue = requireModule('vue') as VueModule;
+    const Codex = requireModule('@wikimedia/codex') as CodexModule;
+    window.Vue = window.Vue ?? Vue;
+    return { Vue, Codex };
 }
 
-/**
- * Create dialog mount point if it doesn't exist, and return the mount element.
- * @returns {HTMLElement | null} The dialog mount element, or null if it cannot be created.
- */
-export function createDialogMountIfNeeded(): HTMLElement | null {
-    if (!document.getElementById('review-tool-dialog-mount')) {
-        const mountPoint = document.createElement('div');
-        mountPoint.id = 'review-tool-dialog-mount';
-        document.body.appendChild(mountPoint);
-    }
-    return document.getElementById('review-tool-dialog-mount');
+export function createDialogMountIfNeeded(): HTMLElement {
+    const existing = document.getElementById(MOUNT_ID);
+    if (existing) return existing;
+    const mountPoint = document.createElement('div');
+    mountPoint.id = MOUNT_ID;
+    document.body.appendChild(mountPoint);
+    return mountPoint;
 }
 
-/**
- * Mount a Vue app to the dialog mount point, creating the mount if necessary, and set up IME Escape key guarding.
- * @param {VueApp} app - The Vue app instance to mount.
- * @returns {unknown} The result of the app's mount function, typically the root component instance.
- */
 export function mountApp(app: VueApp): unknown {
-    createDialogMountIfNeeded();
+    const mountPoint = createDialogMountIfNeeded();
     installImeEscGuard();
-    _mountedApp = app;
-    _mountedRoot = app.mount('#review-tool-dialog-mount');
-    return _mountedRoot;
+    mountedApp = app;
+    return app.mount(mountPoint);
 }
 
-/**
- * Get the currently mounted Vue app instance, if any.
- * @returns {VueApp | null} The currently mounted Vue app instance, or null if no app is mounted.
- */
 export function getMountedApp(): VueApp | null {
-    return _mountedApp;
+    return mountedApp;
 }
 
-/**
- * Remove the dialog mount element from the DOM, clean up IME Escape key guarding, and clear internal app references.
- */
-export function removeDialogMount() {
-    const mountPoint = document.getElementById('review-tool-dialog-mount');
-    if (mountPoint) mountPoint.remove();
+export function removeDialogMount(): void {
+    const app = mountedApp;
+    mountedApp = null;
+    app?.unmount();
+    document.getElementById(MOUNT_ID)?.remove();
     removeImeEscGuard();
-    _mountedApp = null;
-    _mountedRoot = null;
 }
 
-/**
- * Convenience helper to register commonly-used Codex components on a Vue app.
- * @param {VueApp} app - The Vue app instance to register components on.
- * @param {CodexModule} Codex - The loaded Codex module containing components to register.
- */
-export function registerCodexComponents(app: VueApp, Codex: CodexModule) {
-    if (!app || !app.component || !Codex) return;
-    try {
-        app.component('cdx-dialog', Codex.CdxDialog)
-            .component('cdx-text-area', Codex.CdxTextArea)
-            .component('cdx-select', Codex.CdxSelect)
-            .component('cdx-button', Codex.CdxButton)
-            .component('cdx-menu-button', Codex.CdxMenuButton);
-    } catch {
-        // ignore registration errors
+// A closing dialog must never remove a replacement opened during its transition.
+export function closeDialogAfterTransition(onClosed?: () => void): void {
+    const app = mountedApp;
+    if (!app) return;
+    window.setTimeout(() => {
+        if (mountedApp !== app) return;
+        removeDialogMount();
+        onClosed?.();
+    }, CLOSE_DELAY_MS);
+}
+
+export function registerCodexComponents(app: VueApp, Codex: CodexModule): void {
+    const components = {
+        'cdx-dialog': Codex.CdxDialog,
+        'cdx-text-area': Codex.CdxTextArea,
+        'cdx-select': Codex.CdxSelect,
+        'cdx-button': Codex.CdxButton,
+        'cdx-menu-button': Codex.CdxMenuButton,
+    };
+    for (const [name, component] of Object.entries(components)) {
+        if (component) app.component(name, component as Component);
     }
 }

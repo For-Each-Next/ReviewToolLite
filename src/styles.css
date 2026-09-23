@@ -39,38 +39,12 @@
     resize: vertical;
 }
 
-/* Annotation UI styles */
-.review-tool-annotation-ui .sentence {
-    background: transparent;
-}
-
-.review-tool-annotation-ui .sentence:hover {
-    background: rgba(255, 235, 59, 0.12);
-}
-
-.review-tool-annotation-ui .annotation-badge {
-    display: inline-block;
-    background: #ffcc00;
-    color: #000;
-    border-radius: 10px;
-    padding: 0 6px;
-    font-size: 11px;
-    margin-left: 6px;
-}
-
-.review-tool-annotation-ui .floating-button {
-    background: #1976d2;
-    color: white;
-    border: none;
-    padding: 6px 8px;
-    border-radius: 4px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-    cursor: pointer;
-}
-
-/* Floating popup button: span has both classes on same element */
-.review-tool-annotation-ui.floating-button,
-.floating-button.review-tool-annotation-ui {
+/* Annotation controls */
+.review-tool-annotation-ui.floating-button {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    z-index: 9999;
+    pointer-events: auto;
     background: #1976d2;
     color: #fff;
     border: none;
@@ -87,7 +61,102 @@
     background: #1e88e5;
 }
 
-/* Annotation badge actual class name fix */
+.review-tool-reference-tip {
+    margin-inline-start: 0.25em;
+    color: var(--color-subtle, #54595d);
+    font-size: 0.75em;
+    vertical-align: super;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.review-tool-reference-tip button {
+    appearance: none;
+    padding: 0 0.15em;
+    border: 0;
+    background: transparent;
+    color: var(--color-progressive, #36c);
+    font: inherit;
+    cursor: pointer;
+}
+
+.review-tool-reference-tip button:hover,
+.review-tool-reference-tip button:focus-visible {
+    text-decoration: underline;
+}
+
+.review-tool-reference-menu {
+    position: fixed;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    min-width: 10em;
+    max-width: calc(100vw - 8px);
+    max-height: calc(100vh - 8px);
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 4px;
+    border: 1px solid var(--border-color-base, #a2a9b1);
+    border-radius: 4px;
+    background: var(--background-color-base, #fff);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: normal;
+}
+
+.review-tool-reference-menu button {
+    padding: 6px 12px;
+    text-align: start;
+    color: var(--color-base, #202122);
+}
+
+.review-tool-reference-menu button:hover,
+.review-tool-reference-menu button:focus-visible {
+    background: var(--background-color-interactive, #eaecf0);
+    text-decoration: none;
+}
+
+.review-tool-reference-menu button:disabled {
+    color: var(--color-disabled, #72777d);
+    cursor: default;
+}
+
+.review-tool-reference-tip[hidden],
+.review-tool-reference-tip [hidden] {
+    display: none;
+}
+
+.review-tool-undo-clear {
+    margin-inline-start: 8px;
+    cursor: pointer;
+}
+
+.review-tool-global-button {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 10100;
+    padding: 10px 16px;
+    background: #36c;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.review-tool-global-button:hover {
+    background: #447ff5;
+}
+
+.review-tool-annotation-mode .review-tool-global-button {
+    display: block;
+}
+
 .review-tool-annotation-badge {
     display: inline-block;
     background: #ffcc00;
@@ -280,6 +349,27 @@
     margin-bottom: 16px;
 }
 
+.review-tool-annotation-viewer__times {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: var(--color-subtle, #54595d);
+}
+
+.review-tool-annotation-viewer__times > div {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 8px;
+    margin-bottom: 4px;
+}
+
+.review-tool-annotation-viewer__times dt {
+    font-weight: 600;
+}
+
+.review-tool-annotation-viewer__times dd {
+    margin: 0;
+}
+
 .review-tool-annotation-viewer__section-title {
     font-size: 13px;
     font-weight: 600;
@@ -327,40 +417,22 @@
     margin-top: 6px;
 }
 
-/* Sentence highlight styles adapt to current DOM: spans carry both classes */
-.review-tool-annotation-ui.sentence {
+/* Sentence selection and hover states. */
+.review-tool-annotation-ui.sentence,
+.review-tool-annotation-ui .sentence {
     background: transparent;
     transition: background 120ms ease-in;
-}
-
-.review-tool-annotation-ui.sentence:hover {
-    background: rgba(255, 235, 59, 0.2);
-}
-
-/* Keep descendant version for future container-based refactor */
-.review-tool-annotation-ui .sentence:hover {
-    background: rgba(255, 235, 59, 0.2);
-}
-
-/* Cursor behavior for annotation sentences */
-.review-tool-annotation-ui.sentence {
     cursor: pointer;
+    pointer-events: auto;
+}
+
+.review-tool-annotation-ui.sentence:hover,
+.review-tool-annotation-ui .sentence:hover {
+    background: rgba(255, 235, 59, 0.22) !important;
 }
 
 html.rt-selecting .review-tool-annotation-ui.sentence {
     cursor: text;
-}
-
-/* Ensure floating button is always clickable */
-.review-tool-annotation-ui.floating-button,
-.floating-button.review-tool-annotation-ui {
-    cursor: pointer;
-}
-
-/* Stronger highlight rule to ensure visibility on pages with competing styles */
-.review-tool-annotation-ui.sentence:hover,
-.review-tool-annotation-ui .sentence:hover {
-    background: rgba(255, 235, 59, 0.22) !important;
 }
 
 /* While annotation mode is active, allow selection over known inline editor widgets

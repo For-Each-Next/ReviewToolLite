@@ -1,23 +1,11 @@
 import type { AnnotationGroup } from './annotations';
-import { compareOrderKeys } from './dom/numeric_pos';
+import { sortGroupsByPosition } from './annotation_order';
 
 export type WritingReviewSuggestion = { quote: string; suggestion: string };
 export type WritingReviewChapter = { title: string; suggestions: WritingReviewSuggestion[] };
 
 export function buildWritingReviewChapters(groups: AnnotationGroup[], fallbackTitle: string): WritingReviewChapter[] {
-    return groups
-        .filter(group => group.annotations.length)
-        .map(group => ({
-            ...group,
-            annotations: group.annotations.slice().sort((a, b) => {
-                const cmp = compareOrderKeys(a.sentencePos, b.sentencePos);
-                return cmp || (a.createdAt || 0) - (b.createdAt || 0);
-            })
-        }))
-        .sort((a, b) => {
-            const cmp = compareOrderKeys(a.annotations[0]?.sentencePos, b.annotations[0]?.sentencePos);
-            return cmp || (a.sectionPath || '').localeCompare(b.sectionPath || '');
-        })
+    return sortGroupsByPosition(groups)
         .map(group => ({
             title: group.sectionPath || fallbackTitle,
             suggestions: group.annotations.map(anno => ({
@@ -54,11 +42,13 @@ function formatRevisionLabel(timestamp: string): string {
 }
 
 export function buildWritingReviewWikitext(chapters: WritingReviewChapter[], context: WritingReviewLinkContext): string {
+    if (!chapters.length) return '';
+    const revisionLabel = formatRevisionLabel(context.revisionTimestamp);
     let wikitext = '';
     for (const chapter of chapters) {
         const title = (chapter.title || '').trim();
         const sectionLink = `[[${context.articleTitle}#${title}|${title}]]`;
-        const permalink = `[[Special:PermaLink/${context.revisionId}#${title}|${formatRevisionLabel(context.revisionTimestamp)}]]`;
+        const permalink = `[[Special:PermaLink/${context.revisionId}#${title}|${revisionLabel}]]`;
         wikitext += `'''${sectionLink}'''<small>（基于${permalink}版）</small>\n`;
         for (const item of chapter.suggestions) {
             const quote = (item.quote || '').trim();

@@ -14,7 +14,7 @@ function continueCommentList(textarea: HTMLTextAreaElement): void {
     const marker = bullet ? `${bullet[1]}${bullet[2]} ` : '* ';
     const firstComment = bullet ? previousLine : `* ${previousLine}`;
     const nextCaret = caret + firstComment.length - previousLine.length + marker.length;
-    textarea.value = textarea.value.slice(0, lineStart) + firstComment + '\n' + marker + textarea.value.slice(caret);
+    textarea.value = `${textarea.value.slice(0, lineStart) + firstComment  }\n${  marker  }${textarea.value.slice(caret)}`;
     textarea.setSelectionRange(nextCaret, nextCaret);
 }
 

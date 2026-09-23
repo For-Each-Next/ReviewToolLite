@@ -7,7 +7,7 @@ const EXCLUDED_TEXT = [
     '[data-reference]', '[data-ref]', '.mw-editsection', '.qeec-ref-tag-copy-btn',
     'ipe-quick-edit', '.ipe__in-article-link', '.ipe-quick-edit', '.ipe-quick-edit--create-only',
     '.review-tool-inline-annotation', '.review-tool-annotation-badge', '.floating-button',
-    '.review-tool-global-button', '.review-tool-dialog'
+    '.review-tool-global-button', '.review-tool-dialog', '.review-tool-reference-tip'
 ].join(',');
 
 interface TextSegment {
@@ -47,14 +47,13 @@ export function buildArticleTextIndex(root: Element): ArticleTextIndex {
 export function captureAnnotationAnchor(index: ArticleTextIndex, range: Range): AnnotationTextAnchor | undefined {
     let start: number | undefined;
     let end = 0;
-    for (const segment of index.segments) {
-        if (!range.intersectsNode(segment.node)) continue;
-        for (let i = 0; i < segment.offsets.length; i++) {
-            const offset = segment.offsets[i];
-            if (range.comparePoint(segment.node, offset) < 0) continue;
-            if (range.comparePoint(segment.node, offset + 1) > 0) break;
-            if (start === undefined) start = segment.start + i;
-            end = segment.start + i + 1;
+    for (const { node, start: segmentStart, offsets } of index.segments) {
+        if (!range.intersectsNode(node)) continue;
+        for (const [characterIndex, offset] of offsets.entries()) {
+            if (range.comparePoint(node, offset) < 0) continue;
+            if (range.comparePoint(node, offset + 1) > 0) break;
+            if (start === undefined) start = segmentStart + characterIndex;
+            end = segmentStart + characterIndex + 1;
         }
     }
     return start === undefined ? undefined : { start, end, quote: index.text.slice(start, end) };

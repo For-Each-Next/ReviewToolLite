@@ -1,16 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import vm from 'node:vm';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
+import { compileModule } from './helpers/load-module.mjs';
+import { createDialogEnvironment } from './helpers/dialog-environment.mjs';
 
-const { outputFiles } = await build({
-    entryPoints: [fileURLToPath(new URL('../src/annotations.ts', import.meta.url))],
-    bundle: true,
-    write: false,
-    format: 'iife',
-    globalName: 'annotations'
-});
+const createAnnotations = await compileModule('annotations.ts');
+const createSession = await compileModule('annotation_session.ts');
 
 function memoryStorage() {
     const values = new Map();
@@ -21,22 +15,20 @@ function memoryStorage() {
     };
 }
 
-function setup() {
-    const window = { localStorage: memoryStorage(), sessionStorage: memoryStorage() };
-    const context = vm.createContext({
+function setup(window = { localStorage: memoryStorage(), sessionStorage: memoryStorage() }) {
+    const api = createAnnotations({
         window,
         mw: { config: { get: () => 'Test user' } },
         console: { error() {}, warn() {} }
     });
-    vm.runInContext(outputFiles[0].text, context);
-    return { api: context.annotations, ...window };
+    return { api, ...window };
 }
 
 const pageName = '測試條目';
 const key = `reviewtool:annotations:${pageName}`;
 const annotation = {
     id: 'example', sectionPath: '序言', sentencePos: '1.2', sentenceText: '原文',
-    opinion: '建議', createdBy: 'Reviewer', createdAt: 1234, resolved: false,
+    opinion: '建議', createdBy: 'Reviewer', createdAt: 1234, updatedAt: 2345, resolved: false,
     textAnchor: { start: 5, end: 7, quote: '原文' }
 };
 const backup = annotations => JSON.stringify({
@@ -65,10 +57,11 @@ test('merges without replacing local edits or duplicating repeated imports', () 
 
 test('accepts legacy exports without positions, UTF-8 BOMs, and stored annotation backups', () => {
     const { api } = setup();
-    const { sentencePos, textAnchor, ...legacy } = annotation;
-    assert.equal(api.importAnnotations(pageName, '\uFEFF' + backup([legacy])), 1);
+    const { sentencePos, textAnchor, updatedAt, ...legacy } = annotation;
+    assert.equal(api.importAnnotations(pageName, `\uFEFF${  backup([legacy])}`), 1);
     assert.equal(api.getAnnotation(pageName, legacy.id).sentencePos, '');
     assert.equal(api.getAnnotation(pageName, legacy.id).textAnchor, undefined);
+    assert.equal(api.getAnnotation(pageName, legacy.id).updatedAt, undefined);
     assert.equal(api.importAnnotations(pageName, JSON.stringify({
         pageName: '另一條目', annotations: [{ ...annotation, id: 'stored' }]
     })), 1);
@@ -100,6 +93,26 @@ test('empty backups leave existing annotations intact', () => {
     assert.equal(localStorage.getItem(key), before);
 });
 
+test('editing records the latest edit without changing creation time and persists it across reloads', () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    const before = Date.now();
+    const edited = api.updateAnnotation(pageName, annotation.id, { opinion: '修改後' });
+    assert.equal(edited.createdAt, annotation.createdAt);
+    assert.ok(edited.updatedAt >= before && edited.updatedAt <= Date.now());
+    const reloaded = setup({ localStorage, sessionStorage }).api;
+    assert.equal(reloaded.getAnnotation(pageName, annotation.id).updatedAt, edited.updatedAt);
+    assert.equal(reloaded.buildAnnotationGroups(pageName)[0].annotations[0].updatedAt, edited.updatedAt);
+});
+
+test('invalid or older edit timestamps do not override creation time', () => {
+    for (const updatedAt of ['invalid', null, 1, Number.MAX_VALUE]) {
+        const { api } = setup();
+        api.importAnnotations(pageName, backup([{ ...annotation, updatedAt }]));
+        assert.equal(api.getAnnotation(pageName, annotation.id).updatedAt, undefined);
+    }
+});
+
 test('uses session fallback without reading a stale local copy', () => {
     const { api, localStorage, sessionStorage } = setup();
     api.importAnnotations(pageName, backup([annotation]));
@@ -117,4 +130,166 @@ test('reports failed persistence while preserving the existing backup', () => {
     localStorage.setItem = sessionStorage.setItem = () => { throw new Error('Quota exceeded'); };
     assert.throws(() => api.importAnnotations(pageName, backup([{ ...annotation, id: 'new' }])), /Unable to save/);
     assert.equal(localStorage.getItem(key), before);
+});
+
+test('clearing saves an undo copy that survives reload and restores author, positions and anchors', () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    assert.equal(api.clearAnnotations(pageName), true);
+    assert.equal(api.loadAnnotations(pageName).annotations.length, 0);
+    const reloaded = setup({ localStorage, sessionStorage }).api;
+    assert.equal(reloaded.canUndoClearAnnotations(pageName), true);
+    assert.equal(reloaded.undoClearAnnotations(pageName), 1);
+    assert.deepEqual(JSON.parse(localStorage.getItem(key)).annotations, [annotation]);
+    assert.equal(reloaded.canUndoClearAnnotations(pageName), false);
+    assert.equal(reloaded.undoClearAnnotations(pageName), 0);
+});
+
+test('undo merges with new comments and keeps newer edits to reimported comments', () => {
+    const { api } = setup();
+    api.importAnnotations(pageName, backup([annotation, { ...annotation, id: 'restore' }]));
+    api.clearAnnotations(pageName);
+    api.importAnnotations(pageName, backup([{ ...annotation, opinion: '新修改' }, { ...annotation, id: 'new' }]));
+    assert.equal(api.undoClearAnnotations(pageName), 1);
+    assert.equal(api.loadAnnotations(pageName).annotations.length, 3);
+    assert.equal(api.getAnnotation(pageName, annotation.id).opinion, '新修改');
+});
+
+test('clearing an empty list retains the undo copy and history is isolated by page', () => {
+    const { api } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    api.clearAnnotations(pageName);
+    assert.equal(api.clearAnnotations(pageName), false);
+    assert.equal(api.canUndoClearAnnotations('別頁'), false);
+    assert.equal(api.undoClearAnnotations('別頁'), 0);
+    assert.equal(api.undoClearAnnotations(pageName), 1);
+});
+
+test('only the most recent nonempty clear is undone', () => {
+    const { api } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    api.clearAnnotations(pageName);
+    api.importAnnotations(pageName, backup([{ ...annotation, id: 'new' }]));
+    api.clearAnnotations(pageName);
+    assert.equal(api.undoClearAnnotations(pageName), 1);
+    assert.equal(api.getAnnotation(pageName, annotation.id), null);
+    assert.equal(api.getAnnotation(pageName, 'new').id, 'new');
+});
+
+test('failed clearing leaves current annotations intact', () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    const before = localStorage.getItem(key);
+    localStorage.setItem = sessionStorage.setItem = () => { throw new Error('Quota exceeded'); };
+    assert.throws(() => api.clearAnnotations(pageName), /Unable to clear/);
+    assert.equal(localStorage.getItem(key), before);
+    assert.equal(api.canUndoClearAnnotations(pageName), false);
+});
+
+test('failed undo retains both new comments and the undo copy for retry', () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    api.clearAnnotations(pageName);
+    api.importAnnotations(pageName, backup([{ ...annotation, id: 'new' }]));
+    const before = localStorage.getItem(key);
+    const saveLocal = localStorage.setItem;
+    localStorage.setItem = sessionStorage.setItem = () => { throw new Error('Quota exceeded'); };
+    assert.throws(() => api.undoClearAnnotations(pageName), /Unable to restore/);
+    assert.equal(localStorage.getItem(key), before);
+    localStorage.setItem = saveLocal;
+    assert.equal(api.undoClearAnnotations(pageName), 1);
+    assert.equal(api.loadAnnotations(pageName).annotations.length, 2);
+});
+
+test('clear and undo work with session storage fallback', () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    localStorage.setItem = () => { throw new Error('Quota exceeded'); };
+    assert.equal(api.clearAnnotations(pageName), true);
+    assert.equal(localStorage.getItem(key), null);
+    assert.equal(api.undoClearAnnotations(pageName), 1);
+    assert.deepEqual(JSON.parse(sessionStorage.getItem(key)).annotations, [annotation]);
+});
+
+function activationSession(storage, confirm) {
+    const { globals } = createDialogEnvironment({
+        onDialog: dialog => {
+            void Promise.resolve(confirm()).then(accepted => {
+                if (accepted) dialog.props.onPrimary();
+                else dialog.props.onDefault();
+            });
+        }
+    });
+    return createSession({
+        ...globals,
+        window: { ...globals.window, ...storage },
+        console: { error() {}, warn() {} }
+    });
+}
+
+for (const accepted of [true, false]) {
+    test(`first activation prompts once and ${accepted ? 'clears on confirmation' : 'preserves comments on cancel'}`, async () => {
+        const { api, localStorage, sessionStorage } = setup();
+        api.importAnnotations(pageName, backup([annotation]));
+        let prompts = 0;
+        const session = activationSession({ localStorage, sessionStorage }, () => { prompts++; return accepted; });
+        const clear = () => api.clearAnnotations(pageName);
+        await session.confirmClearOnFirstActivation(pageName, clear);
+        await session.confirmClearOnFirstActivation(pageName, clear);
+        assert.equal(prompts, 1);
+        assert.equal(api.loadAnnotations(pageName).annotations.length, accepted ? 0 : 1);
+        assert.equal(api.canUndoClearAnnotations(pageName), accepted);
+    });
+}
+
+test('activating an empty page skips the prompt even after adding comments during that visit', async () => {
+    const { api, localStorage, sessionStorage } = setup();
+    const session = activationSession({ localStorage, sessionStorage }, () => assert.fail('unexpected prompt'));
+    await session.confirmClearOnFirstActivation(pageName, () => assert.fail('unexpected clear'));
+    api.importAnnotations(pageName, backup([annotation]));
+    await session.confirmClearOnFirstActivation(pageName, () => assert.fail('unexpected clear'));
+});
+
+test('another page and a fresh visit get their own first-activation prompt', async () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    api.importAnnotations('別頁', backup([annotation]));
+    let prompts = 0;
+    const confirm = () => { prompts++; return false; };
+    const storage = { localStorage, sessionStorage };
+    const session = activationSession(storage, confirm);
+    await session.confirmClearOnFirstActivation(pageName, () => {});
+    await session.confirmClearOnFirstActivation('別頁', () => {});
+    await activationSession(storage, confirm).confirmClearOnFirstActivation(pageName, () => {});
+    assert.equal(prompts, 3);
+});
+
+test('pending confirmation preserves comments and repeated activation does not open another dialog', async () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    let respond;
+    let prompts = 0;
+    const session = activationSession({ localStorage, sessionStorage }, () => {
+        prompts++;
+        return new Promise(resolve => { respond = resolve; });
+    });
+    const pending = session.confirmClearOnFirstActivation(pageName, () => api.clearAnnotations(pageName));
+    await new Promise(resolve => setImmediate(resolve));
+    await session.confirmClearOnFirstActivation(pageName, () => assert.fail('duplicate clear'));
+    assert.equal(prompts, 1);
+    assert.equal(api.loadAnnotations(pageName).annotations.length, 1);
+    respond(true);
+    await pending;
+    assert.equal(api.loadAnnotations(pageName).annotations.length, 0);
+    assert.equal(api.canUndoClearAnnotations(pageName), true);
+});
+
+test('failed Codex loading preserves existing annotations', async () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([annotation]));
+    const error = new Error('Loading failed');
+    const { globals } = createDialogEnvironment({ loadError: error });
+    const session = createSession({ ...globals, window: { ...globals.window, localStorage, sessionStorage } });
+    await assert.rejects(session.confirmClearOnFirstActivation(pageName, () => assert.fail('unexpected clear')), error);
+    assert.equal(api.loadAnnotations(pageName).annotations.length, 1);
 });
