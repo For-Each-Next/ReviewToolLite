@@ -33,7 +33,7 @@ export async function copyWritingReview(groups: AnnotationGroup[]): Promise<bool
             revisionTimestamp
         }).trim());
         mw.notify(state.convByVar({
-            hant: '已複製評審文字，可貼到評審頁。', hans: '已复制评审文本，可粘贴到评审页。'
+            hant: '已複製評審文字，可貼到目標頁面。', hans: '已复制评审文本，可粘贴到目标页面。'
         }), { tag: 'review-tool' });
         return true;
     } catch (error) {

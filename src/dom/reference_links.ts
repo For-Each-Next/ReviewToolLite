@@ -3,14 +3,10 @@ import state from '../state';
 
 export const REFERENCE_MARKER_SELECTOR = '.reference, .mw-ref';
 export const REFERENCE_CONTROLS_SELECTOR = '.review-tool-reference-tip';
+type ReferenceCopyFormat = 'footnote' | 'comment';
 
 const escapeWikitext = (text: string): string => text.replace(/[&<>[\]{}|\r\n]/g, character => `&#${character.charCodeAt(0)};`);
 const validRevision = (revisionId: number): boolean => Number.isSafeInteger(revisionId) && revisionId > 0;
-
-export function buildReferencePermalink(revisionId: number, referenceId: string): string | null {
-    if (!validRevision(revisionId) || !/^cite_note-.+/.test(referenceId)) return null;
-    return `[[Special:Permalink/${revisionId}#${escapeWikitext(referenceId)}]]`;
-}
 
 export function buildFootnotePermalink(revisionId: number, footnoteId: string, label: string): string | null {
     if (!validRevision(revisionId) || !/^cite_ref-.+/.test(footnoteId) || !label.trim()) return null;
@@ -39,19 +35,132 @@ function isLocator(marker: Element): boolean {
         && !marker.id.startsWith('cite_ref-') && !citationLink(marker);
 }
 
-function footnoteLabel(link: HTMLAnchorElement, marker: Element, citation: Element): string {
+function footnoteLabel(root: Element, link: HTMLAnchorElement, marker: Element, citation: Element): string {
     const label = (link.innerText ?? link.textContent ?? '').trim().replace(/^\[\s*|\s*\]$/g, '');
     // Read the rendered number, including subreference numbers. Internal Cite IDs
     // are not display numbers (e.g. cite_ref-52-1 can be displayed as 11.12).
     if (!/^\d+(?:\.\d+)*$/.test(label)) return label;
-    const backlinks = Array.from(citation.querySelector('.mw-cite-backlink')?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []);
-    const index = backlinks.findIndex(backlink => localFragment(backlink) === marker.id);
-    if (backlinks.length < 2 || index < 0) return label;
+    // Backlinks can be wrapped together, individually, or identified by rel.
+    // Deduplicate targets so another tool's repeated links cannot shift a/b/c.
+    let occurrences = Array.from(new Set(Array.from(citation.querySelectorAll<HTMLAnchorElement>('a[href]'))
+        .filter(backlink => backlink.closest('.mw-cite-backlink, [rel~="mw:referencedBy"]'))
+        .map(localFragment).filter(id => id?.startsWith('cite_ref-'))));
+    if (occurrences.length < 2 || !occurrences.includes(marker.id)) {
+        // Some renderers/gadgets omit or replace backlink markup. The article's
+        // actual markers still identify repeated uses of the same citation.
+        occurrences = Array.from(new Set(Array.from(root.querySelectorAll(REFERENCE_MARKER_SELECTOR))
+            .filter(item => {
+                const anchor = citationLink(item);
+                return item.id.startsWith('cite_ref-') && anchor && localFragment(anchor) === citation.id;
+            }).map(item => item.id)));
+    }
+    const index = occurrences.indexOf(marker.id);
+    if (occurrences.length < 2 || index < 0) return label;
     let suffix = '';
     for (let number = index + 1; number > 0; number = Math.floor((number - 1) / 26)) {
         suffix = String.fromCharCode(97 + (number - 1) % 26) + suffix;
     }
     return label + suffix;
+}
+
+function webUrl(href: string): URL | null {
+    try {
+        const url = new URL(href, window.location.href);
+        return /^https?:$/.test(url.protocol) ? url : null;
+    } catch {
+        return null;
+    }
+}
+
+function archiveUrl(url: URL): boolean {
+    return /(^|\.)(?:web\.archive\.org|archive\.(?:today|is|ph|vn|md|fo|li)|webcitation\.org|perma\.cc)$/.test(url.hostname);
+}
+
+function externalLink(url: URL, label: string): string {
+    // URL delimiters must be percent-encoded; text labels use character entities.
+    const href = url.href.replace(/[\s<>[\]{}|]/g, character => encodeURIComponent(character));
+    return `[${href} ${escapeWikitext(label)}]`;
+}
+
+function archiveMonth(text: string, url: URL): string | null {
+    const numericDate = text.match(/存[檔档]\s*[於于]\s*(\d{4})(?:-|年\s*)(\d{1,2})/)
+        ?? text.match(/archived(?:\s+from\s+the\s+original)?(?:\s*\([^)]*\))?\s+on\s+(\d{4})-(\d{1,2})/i);
+    const englishDate = text.match(/archived(?:\s+from\s+the\s+original)?(?:\s*\([^)]*\))?\s+on\s+(?:\d{1,2}\s+)?([a-z]+)\.?\s+(?:\d{1,2},?\s+)?(\d{4})/i);
+    const timestamp = url.pathname.match(/^\/(?:web\/)?(\d{4})(\d{2})\d{2}\d*(?:[a-z_]+)?\//);
+    // Prefer the citation's archive date; publication/access dates are unrelated.
+    const dates = [
+        numericDate && [Number(numericDate[1]), Number(numericDate[2])],
+        englishDate && [Number(englishDate[2]), ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+            .indexOf(englishDate[1].slice(0, 3).toLowerCase()) + 1],
+        timestamp && [Number(timestamp[1]), Number(timestamp[2])]
+    ];
+    const date = dates.find(value => value && value[0] > 0 && value[1] >= 1 && value[1] <= 12);
+    return date ? `${date[0]}年${date[1]}月` : null;
+}
+
+function citationDetails(reference: HTMLElement, format: ReferenceCopyFormat): { wikitext: string; title: string; url: string | null } {
+    const content = reference.querySelector<HTMLElement>('.reference-text, .mw-reference-text') ?? reference;
+    const citation = content.querySelector<HTMLElement>('.citation') ?? content.querySelector('cite') ?? content;
+    const links = Array.from(citation.querySelectorAll<HTMLAnchorElement>('a[href]')).flatMap(link => {
+        // Read MediaWiki's source links within the narrow citation body, not
+        // arbitrary anchors that tools may insert for icons, help, or actions.
+        if (!link.matches('.external') && !link.getAttribute('rel')?.split(/\s+/).includes('mw:ExtLink')) return [];
+        if (link.closest('.mw-cite-backlink, .cs1-maint, .cs1-visible-error, .mw-editsection, button, [role="button"], [role="menu"], [role="tooltip"], [data-gadget], [data-widget]')
+            || link.matches('.extiw')) return [];
+        const url = webUrl(link.href);
+        return url && url.origin !== window.location.origin ? [{ link, url }] : [];
+    });
+    const archive = links.find(({ url }) => archiveUrl(url));
+    // Dead citations put the archive in the title and the original URL later.
+    const original = links.find(({ link, url }) => !archiveUrl(url)
+        && /^(?:原始(?:內容|内容|文獻|文献)|the original|original)(?:\s|$)/i.test((link.textContent ?? '').trim()))
+        ?? links.find(({ url }) => !archiveUrl(url));
+    const embeddedOriginal = archive?.url.href.match(/\/(https?:\/\/.+)$/)?.[1];
+    const source = original?.url ?? (embeddedOriginal ? webUrl(embeddedOriginal) : null);
+    const details: string[] = [];
+    if (source) details.push(externalLink(source, source.hostname.replace(/^www\./, '')));
+    if (archive) {
+        const text = citation.innerText ?? citation.textContent ?? '';
+        const archiveDate = archiveMonth(text, archive.url);
+        const archiveLabel = format === 'comment' ? `${archiveDate ?? ''}存` : state.convByVar({
+            hant: archiveDate ? `存檔於${archiveDate}` : '存檔',
+            hans: archiveDate ? `存档于${archiveDate}` : '存档'
+        });
+        details.push(externalLink(archive.url, archiveLabel));
+    }
+    // A dead source uses its archive for the linked title; "原始內容" is
+    // merely the helper link back to the original URL, not the source's title.
+    const titleLink = [original, archive].find(item => item && !/^(?:原始(?:內容|内容|文獻|文献)|存[檔档]|the original|original|archived?)(?:\s|$)/i
+        .test((item.link.textContent ?? '').trim())) ?? original ?? archive;
+    const title = (titleLink?.link.textContent || citation.textContent || '').replace(/\s+/g, ' ').trim();
+    const wikitext = !details.length ? '' : format === 'comment'
+        ? `<small>（${details.join('，')}）</small>`
+        : ` <small>(${details.join(', ')})</small>`;
+    return {
+        wikitext,
+        title,
+        url: titleLink?.url.href ?? source?.href ?? null
+    };
+}
+
+export function getReferenceLinkData(root: Element, marker: Element, format: ReferenceCopyFormat = 'footnote'): {
+    label: string; footnote: string | null; title: string; url: string;
+} | null {
+    const link = citationLink(marker);
+    const referenceId = link ? localFragment(link) : null;
+    const target = referenceId ? document.getElementById(referenceId) : null;
+    const revisionId = mw.config.get('wgRevisionId');
+    if (!validRevision(revisionId) || !referenceId || !/^cite_note-.+/.test(referenceId)
+        || !root.contains(marker) || !target || !root.contains(target)) return null;
+    const label = footnoteLabel(root, link, marker, target);
+    const footnote = buildFootnotePermalink(revisionId, marker.id, format === 'comment' ? `Ref. ${label}` : label);
+    const details = citationDetails(target, format);
+    return {
+        footnote: footnote ? footnote + details.wikitext : null,
+        label,
+        title: details.title || state.convByVar({ hant: `註腳 ${label}`, hans: `脚注 ${label}` }),
+        url: details.url ?? new URL(`#${encodeURIComponent(referenceId)}`, window.location.href).href
+    };
 }
 
 export function installReferenceLinkTips(root: Element): () => void {
@@ -62,7 +171,9 @@ export function installReferenceLinkTips(root: Element): () => void {
     tip.hidden = true;
     const trigger = document.createElement('button');
     trigger.type = 'button';
+    trigger.className = 'review-tool-reference-trigger';
     trigger.textContent = state.convByVar({ hant: '複製 ▾', hans: '复制 ▾' });
+    trigger.title = state.convByVar({ hant: '複製', hans: '复制' });
     trigger.setAttribute('aria-haspopup', 'menu');
     trigger.setAttribute('aria-expanded', 'false');
     const menu = document.createElement('span');
@@ -101,17 +212,8 @@ export function installReferenceLinkTips(root: Element): () => void {
         actionButtons = [];
     };
     const linkData = (link: HTMLAnchorElement) => {
-        const referenceId = localFragment(link);
         const marker = link.closest(REFERENCE_MARKER_SELECTOR);
-        const target = referenceId ? document.getElementById(referenceId) : null;
-        const text = referenceId ? buildReferencePermalink(mw.config.get('wgRevisionId'), referenceId) : null;
-        if (!text || !marker || !root.contains(marker) || !target || !root.contains(target)) return null;
-        const label = footnoteLabel(link, marker, target);
-        return {
-            citation: text,
-            footnote: buildFootnotePermalink(mw.config.get('wgRevisionId'), marker.id, label),
-            label
-        };
+        return marker && citationLink(marker) === link ? getReferenceLinkData(root, marker) : null;
     };
     const adjacentMarker = (marker: Element, direction: 'previousSibling' | 'nextSibling'): Element | null => {
         let node: Node | null = marker;
@@ -162,24 +264,20 @@ export function installReferenceLinkTips(root: Element): () => void {
         for (const reference of references) {
             if (!reference) continue;
             makeAction(state.convByVar({
-                hant: `複製註腳 [${reference.label}]`,
-                hans: `复制脚注 [${reference.label}]`
+                hant: `複製${reference.label}`,
+                hans: `复制${reference.label}`
             }), reference.footnote);
-            makeAction(state.convByVar({
-                hant: `複製引文 [${reference.label}]`,
-                hans: `复制引文 [${reference.label}]`
-            }), reference.citation);
         }
         // Locators are transparent; a broken actual reference must not be omitted.
         const links = references.map(reference => reference?.footnote);
         if (links.length > 1 && links.every(Boolean)) {
-            makeAction(state.convByVar({ hant: '複製本組註腳', hans: '复制本组脚注' }), links.join(', '));
+            makeAction(state.convByVar({ hant: '複製本組', hans: '复制本组' }), links.join(', '));
         }
         trigger.setAttribute('aria-label', references.length > 1 ? state.convByVar({
-            hant: '複製註腳群組', hans: '复制脚注组'
+            hant: '複製本組', hans: '复制本组'
         }) : state.convByVar({
-            hant: `複製註腳 ${data.label}`,
-            hans: `复制脚注 ${data.label}`
+            hant: `複製${data.label}`,
+            hans: `复制${data.label}`
         }));
         const lastMarker = markers[markers.length - 1];
         if (lastMarker.nextSibling !== tip) lastMarker.after(tip);

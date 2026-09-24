@@ -10,6 +10,10 @@ on:
 permissions:
     contents: read
 
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: false
+
 jobs:
     build:
         runs-on: ubuntu-latest
@@ -49,8 +53,8 @@ jobs:
 
     release:
         if: >-
-            github.event_name == 'push' &&
-            startsWith(github.ref, 'refs/tags/v')
+            (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+            (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         needs: build
         runs-on: ubuntu-latest
         permissions:
@@ -61,12 +65,42 @@ jobs:
                   name: ReviewToolLite
                   path: dist
 
-            - name: Publish release
+            - name: Publish or update JavaScript release
               env:
                   GH_TOKEN: ${{ github.token }}
                   GH_REPO: ${{ github.repository }}
-                  RELEASE_TAG: ${{ github.ref_name }}
+                  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+                  SOURCE_SHA: ${{ github.sha }}
               run: |
+                  if [[ "$RELEASE_TAG" == latest ]]; then
+                      # An old rerun must not replace the current main build.
+                      main_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+                      if [[ "$SOURCE_SHA" != "$main_sha" ]]; then
+                          echo 'Skipping an outdated main build.'
+                          exit 0
+                      fi
+                      cat > release-notes.md <<EOF
+                  Automatically built from main at $SOURCE_SHA.
+                  These JavaScript files are updated after successful main builds.
+                  EOF
+                      if gh release view latest > /dev/null 2>&1; then
+                          gh release upload latest dist/bundled.js dist/ReviewToolLite.user.js --clobber
+                          gh api --method PATCH "repos/$GH_REPO/git/refs/tags/latest" \
+                              -f sha="$SOURCE_SHA" -F force=true
+                          gh release edit latest --latest --title 'ReviewToolLite latest' \
+                              --notes-file release-notes.md
+                      else
+                          gh release create latest dist/bundled.js dist/ReviewToolLite.user.js \
+                              --target "$SOURCE_SHA" --latest --title 'ReviewToolLite latest' \
+                              --notes-file release-notes.md
+                      fi
+                      exit 0
+                  fi
+
+                  if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+                      gh release upload "$RELEASE_TAG" dist/bundled.js dist/ReviewToolLite.user.js --clobber
+                      exit 0
+                  fi
                   flags=()
                   if [[ "$RELEASE_TAG" == *-* ]]; then
                       flags+=(--prerelease)

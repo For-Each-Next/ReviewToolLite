@@ -19,7 +19,7 @@ for (const [event, confirmed] of [['onPrimary', true], ['onDefault', false], ['o
         assert.equal(dialog.props.primaryAction.label, options.confirmLabel);
         assert.equal(dialog.props.primaryAction.actionType, 'destructive');
         assert.equal(dialog.props.defaultAction.label, options.cancelLabel);
-        assert.equal(dialog.children.default().props, options.message);
+        assert.equal(dialog.children.default()[0].props, options.message);
         dialog.props[event](false);
         dialog.props.onPrimary(); // A second event cannot change the first decision.
         assert.equal(await result, confirmed);

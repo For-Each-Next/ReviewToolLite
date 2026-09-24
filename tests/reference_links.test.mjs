@@ -139,16 +139,15 @@ function setup({ revisionId = 12345, markerClass = 'reference', referenceId = 'c
     const tip = createdElements.find(element => element.className === 'review-tool-reference-tip');
     const menu = createdElements.find(element => element.className === 'review-tool-reference-menu');
     const trigger = tip.firstChild;
-    const footnoteButton = (label = '3') => menu.children.find(button => button.textContent === `複製註腳 [${label}]`);
-    const citationButton = (label = '3') => menu.children.find(button => button.textContent === `複製引文 [${label}]`);
-    const groupButton = () => menu.children.find(button => button.textContent === '複製本組註腳');
+    const footnoteButton = (label = '3') => menu.children.find(button => button.textContent === `複製${label}`);
+    const groupButton = () => menu.children.find(button => button.textContent === '複製本組');
     const fire = (type, target = first.number, surface = root) => {
         const event = new Event(type, { cancelable: true });
         Object.defineProperty(event, 'target', { value: target });
         surface.dispatchEvent(event);
         return event;
     };
-    return { api, root, paragraph, ...first, tip, menu, trigger, footnoteButton, citationButton, groupButton, window, document,
+    return { api, root, paragraph, ...first, tip, menu, trigger, footnoteButton, groupButton, window, document,
         copies, notifications, cleanup, fire, addReference, addLocator, Element, Node };
 }
 
@@ -161,21 +160,117 @@ const key = (target, value) => {
     else target.dispatchEvent(event);
     return event;
 };
-const citationLink = id => `[[Special:Permalink/12345#${id}]]`;
 const footnoteLink = (id, label) => `[[Special:Permalink/12345#${id}|${label}]]`;
 
 const firstFootnote = footnoteLink('cite_ref-Ozawa2023_3-0', '3');
 
-test('citation copying retains the existing reference-list permalink format', async () => {
-    const { api, fire, citationButton, copies } = setup();
-    assert.equal(api.buildReferencePermalink(12345, 'cite_note-MC_PC_Reviews-23'), citationLink('cite_note-MC_PC_Reviews-23'));
-    assert.equal(api.buildReferencePermalink(12345, 'cite_ref-3'), null);
-    assert.equal(api.buildReferencePermalink(12345, 'cite_note-'), null);
-    assert.equal(api.buildReferencePermalink(12345, 'cite_note-A|B]-1'), citationLink('cite_note-A&#124;B&#93;-1'));
-    fire('mouseover');
-    click(citationButton());
+function addCitation(fixture, parts, reference = fixture.reference) {
+    const content = reference.appendChild(new fixture.Element('span'));
+    content.className = 'reference-text';
+    const citation = content.appendChild(new fixture.Element('cite'));
+    for (const part of parts) {
+        if (typeof part === 'string') citation.append(part);
+        else {
+            const link = citation.appendChild(new fixture.Element('a'));
+            link.className = 'external text';
+            link.href = part[0];
+            link.textContent = part[1];
+        }
+    }
+    return citation;
+}
+
+for (const archivedTitle of [false, true]) {
+    test(`footnote copying includes source and archive details with ${archivedTitle ? 'archived' : 'live'} title links`, async () => {
+        const fixture = setup({ label: '[3a]' });
+        const source = 'https://www.example.com/article?one=1&two=2';
+        const archive = `https://web.archive.org/web/20230901000000/${source}`;
+        addCitation(fixture, [
+            [archivedTitle ? archive : source, 'Article title'], '. 2023-08-01. [2023-08-15]. （',
+            [archivedTitle ? source : archive, '原始内容'], '存档于2023-10-02）.'
+        ]);
+        fixture.fire('mouseover');
+        click(fixture.footnoteButton('3a'));
+        await settle();
+        assert.deepEqual(fixture.copies, [
+            `${footnoteLink('cite_ref-Ozawa2023_3-0', '3a')} <small>([${source} example.com], [${archive} 存檔於2023年10月])</small>`
+        ]);
+    });
+}
+
+test('source-only and grouped footnotes include their own citation details', async () => {
+    const fixture = setup();
+    addCitation(fixture, [['https://www.example.com/article', 'Article title']]);
+    const second = fixture.addReference('cite_note-4', { footnoteId: 'cite_ref-4' });
+    addCitation(fixture, [
+        ['https://news.example.org/story', 'Second title'], '. （',
+        ['https://archive.today/abc123', '原始內容'], '存檔於2023年9月1日）.'
+    ], second.reference);
+    fixture.fire('mouseover');
+    click(fixture.footnoteButton());
+    click(fixture.groupButton());
     await settle();
-    assert.deepEqual(copies, [citationLink('cite_note-Ozawa2023-3')]);
+    const first = `${firstFootnote} <small>([https://www.example.com/article example.com])</small>`;
+    const other = `${footnoteLink('cite_ref-4', '4')} <small>([https://news.example.org/story news.example.org], [https://archive.today/abc123 存檔於2023年9月])</small>`;
+    assert.deepEqual(fixture.copies, [first, `${first}, ${other}`]);
+});
+
+test('archive-only Wayback citations recover the source URL and snapshot date', async () => {
+    const fixture = setup();
+    const source = 'https://example.com/article?q=1&lang=en#section';
+    const archive = `https://web.archive.org/web/20230901123456id_/${source}`;
+    addCitation(fixture, [[archive, 'Article title']]);
+    fixture.fire('mouseover');
+    click(fixture.footnoteButton());
+    await settle();
+    assert.deepEqual(fixture.copies, [
+        `${firstFootnote} <small>([${source} example.com], [${archive} 存檔於2023年9月])</small>`
+    ]);
+});
+
+test('archive labels use Chinese year and month for supported date formats', async () => {
+    for (const [description, label] of [
+        ['. Archived from the original on 1 September 2023.', '存檔於2023年9月'],
+        ['. Archived on September 1, 2023.', '存檔於2023年9月'],
+        ['. Archived from the original (PDF) on 2023-09-01.', '存檔於2023年9月'],
+        ['. Archived on September 2023.', '存檔於2023年9月'],
+        ['. 存檔於2023年9月。', '存檔於2023年9月'],
+        ['. 存档 于 2023-09-01。', '存檔於2023年9月'],
+        ['. Published 2020-05-25. Accessed 2024-07-10.', '存檔'],
+        ['. 存檔於2023-13-01。', '存檔'],
+        ['', '存檔']
+    ]) {
+        const fixture = setup();
+        addCitation(fixture, [['https://archive.ph/abc123', 'Article title'], description]);
+        fixture.fire('mouseover');
+        click(fixture.footnoteButton());
+        await settle();
+        assert.deepEqual(fixture.copies, [`${firstFootnote} <small>([https://archive.ph/abc123 ${label}])</small>`]);
+    }
+});
+
+test('citation details skip internal and unsafe links and encode wikitext URL delimiters', async () => {
+    const fixture = setup();
+    addCitation(fixture, [
+        ['https://zh.wikipedia.org/wiki/Author', 'Author'],
+        ['javascript:alert(1)', 'Invalid source'],
+        ['https://example.com/a[1]?q={value}|x&next=2', 'Article title']
+    ]);
+    fixture.fire('mouseover');
+    click(fixture.footnoteButton());
+    await settle();
+    assert.deepEqual(fixture.copies, [
+        `${firstFootnote} <small>([https://example.com/a%5B1%5D?q=%7Bvalue%7D%7Cx&next=2 example.com])</small>`
+    ]);
+});
+
+test('the copy menu contains only footnote actions with unbracketed labels', async () => {
+    const { fire, menu, footnoteButton, copies } = setup({ label: '[18c]' });
+    fire('mouseover');
+    assert.deepEqual(menu.children.map(button => button.textContent), ['複製18c']);
+    click(footnoteButton('18c'));
+    await settle();
+    assert.deepEqual(copies, [footnoteLink('cite_ref-Ozawa2023_3-0', '18c')]);
 });
 
 test('footnotes preserve full anchors and labels while escaping wikitext', () => {
@@ -184,7 +279,6 @@ test('footnotes preserve full anchors and labels while escaping wikitext', () =>
     assert.equal(api.buildFootnotePermalink(12345, 'cite_ref-中文&|]-0', '5.1a|x'), footnoteLink('cite_ref-中文&#38;&#124;&#93;-0', '5.1a&#124;x'));
     for (const revision of [0, -1, NaN, 1.5]) {
         assert.equal(api.buildFootnotePermalink(revision, 'cite_ref-3', '3'), null);
-        assert.equal(api.buildReferencePermalink(revision, 'cite_note-3'), null);
     }
     for (const id of ['cite_note-3', 'cite_ref-', '']) assert.equal(api.buildFootnotePermalink(12345, id, '3'), null);
     assert.equal(api.buildFootnotePermalink(12345, 'cite_ref-3', ' '), null);
@@ -205,6 +299,8 @@ for (const markerClass of ['reference', 'mw-ref']) {
         assert.equal(marker.nextSibling, tip);
         assert.equal(trigger.closest('.reference, .mw-ref'), null);
         assert.equal(trigger.closest('a[href]'), null);
+        assert.equal(trigger.textContent, '複製 ▾');
+        assert.equal(trigger.getAttribute('aria-label'), '複製3');
         assert.equal(groupButton(), undefined);
         assert.equal(marker.textContent, markerText);
         assert.equal(link.href, href);
@@ -231,15 +327,14 @@ test('Ozawa2023 repeated footnotes use the display number and their own occurren
 });
 
 test('new Cite anchors use the displayed subreference label, not the internal number', async () => {
-    const { addReference, fire, footnoteButton, citationButton, copies } = setup({
+    const { addReference, fire, footnoteButton, copies } = setup({
         referenceId: 'cite_note-52', footnoteId: 'cite_ref-52', label: '[11.12]'
     });
     const second = addReference('cite_note-52', { footnoteId: 'cite_ref-52-1', label: '[11.12]' });
     fire('mouseover', second.number);
     click(footnoteButton('11.12b'));
-    click(citationButton('11.12b'));
     await settle();
-    assert.deepEqual(copies, [footnoteLink('cite_ref-52-1', '11.12b'), citationLink('cite_note-52')]);
+    assert.deepEqual(copies, [footnoteLink('cite_ref-52-1', '11.12b')]);
 });
 
 test('adjacent references preserve each displayed label and anchor, from any marker', async () => {
@@ -262,7 +357,7 @@ test('adjacent references preserve each displayed label and anchor, from any mar
 });
 
 test('the group-end menu can copy [18] after crossing [19] on the way to the trigger', async () => {
-    const { addReference, fire, tip, trigger, menu, footnoteButton, citationButton, groupButton, copies } = setup({
+    const { addReference, fire, tip, trigger, menu, footnoteButton, groupButton, copies } = setup({
         referenceId: 'cite_note-18', footnoteId: 'cite_ref-18', label: '[18]'
     });
     const second = addReference('cite_note-19', { footnoteId: 'cite_ref-19', label: '[19]' });
@@ -272,37 +367,32 @@ test('the group-end menu can copy [18] after crossing [19] on the way to the tri
     assert.equal(second.marker.nextSibling, tip);
     click(trigger);
     assert.deepEqual(menu.children.map(button => button.textContent), [
-        '複製註腳 [18]', '複製引文 [18]', '複製註腳 [19]', '複製引文 [19]', '複製本組註腳'
+        '複製18', '複製19', '複製本組'
     ]);
-    assert.equal(trigger.getAttribute('aria-label'), '複製註腳群組');
+    assert.equal(trigger.getAttribute('aria-label'), '複製本組');
     click(footnoteButton('18'));
     click(trigger);
-    click(citationButton('18'));
-    click(trigger);
     click(footnoteButton('19'));
-    click(trigger);
-    click(citationButton('19'));
     click(trigger);
     click(groupButton());
     await settle();
     assert.deepEqual(copies, [
-        footnoteLink('cite_ref-18', '18'), citationLink('cite_note-18'),
-        footnoteLink('cite_ref-19', '19'), citationLink('cite_note-19'),
+        footnoteLink('cite_ref-18', '18'), footnoteLink('cite_ref-19', '19'),
         [footnoteLink('cite_ref-18', '18'), footnoteLink('cite_ref-19', '19')].join(', ')
     ]);
 });
 
 test('moving between markers in an open group keeps its actions and keyboard focus', () => {
-    const { addReference, fire, trigger, menu, citationButton, document } = setup();
+    const { addReference, fire, trigger, menu, footnoteButton, document } = setup();
     const second = addReference('cite_note-4');
     fire('mouseover');
     click(trigger);
-    const firstAction = citationButton();
+    const firstAction = footnoteButton();
     firstAction.focus();
     fire('mouseover', second.number);
     assert.equal(menu.hidden, false);
     assert.equal(trigger.getAttribute('aria-expanded'), 'true');
-    assert.equal(citationButton(), firstAction);
+    assert.equal(footnoteButton(), firstAction);
     assert.equal(document.activeElement, firstAction);
 });
 
@@ -403,8 +493,8 @@ test('broken actual references suppress group copying instead of silently droppi
     }
 });
 
-test('missing footnote anchors leave citation copying available and keyboard navigation skips the disabled action', async () => {
-    const { addReference, fire, trigger, menu, footnoteButton, citationButton, groupButton, document, copies } = setup();
+test('missing footnote anchors disable copying and keyboard navigation skips the disabled action', async () => {
+    const { addReference, fire, trigger, menu, footnoteButton, groupButton, document, copies } = setup();
     const second = addReference('cite_note-4');
     second.marker.id = '';
     fire('mouseover');
@@ -412,11 +502,10 @@ test('missing footnote anchors leave citation copying available and keyboard nav
     assert.equal(groupButton(), undefined);
     key(trigger, 'ArrowDown');
     key(menu, 'ArrowDown');
-    key(menu, 'ArrowDown');
-    assert.equal(document.activeElement, citationButton('4'));
-    click(citationButton('4'));
+    assert.equal(document.activeElement, footnoteButton());
+    click(footnoteButton());
     await settle();
-    assert.deepEqual(copies, [citationLink('cite_note-4')]);
+    assert.deepEqual(copies, [firstFootnote]);
 });
 
 test('moving into and scrolling a native preview keeps the copy trigger available', () => {
@@ -449,18 +538,16 @@ test('the popup avoids visible Reference Tooltips and stays within the viewport'
 });
 
 test('keyboard menu navigation, Escape, Tab and outside dismissal', () => {
-    const { addReference, fire, tip, menu, trigger, footnoteButton, citationButton, groupButton, link, window, document } = setup();
+    const { addReference, fire, tip, menu, trigger, footnoteButton, groupButton, link, window, document } = setup();
     addReference('cite_note-4');
     fire('focusin', link);
     key(trigger, 'ArrowDown');
     assert.equal(document.activeElement, footnoteButton());
     assert.equal(menu.getAttribute('role'), 'menu');
     key(menu, 'ArrowDown');
-    assert.equal(document.activeElement, citationButton());
-    key(menu, 'ArrowDown');
     assert.equal(document.activeElement, footnoteButton('4'));
     key(menu, 'ArrowDown');
-    assert.equal(document.activeElement, citationButton('4'));
+    assert.equal(document.activeElement, groupButton());
     key(menu, 'Home');
     assert.equal(document.activeElement, footnoteButton());
     key(menu, 'End');
@@ -485,7 +572,7 @@ test('keyboard menu navigation, Escape, Tab and outside dismissal', () => {
 });
 
 test('switching to a different group closes the popup and replaces its actions', async () => {
-    const { paragraph, addReference, fire, trigger, menu, footnoteButton, citationButton, copies } = setup();
+    const { paragraph, addReference, fire, trigger, menu, footnoteButton, copies } = setup();
     paragraph.append('Different statement');
     const second = addReference('cite_note-4');
     fire('mouseover');
@@ -494,13 +581,13 @@ test('switching to a different group closes the popup and replaces its actions',
     assert.equal(menu.hidden, true);
     assert.equal(footnoteButton(), undefined);
     click(trigger);
-    click(citationButton('4'));
+    click(footnoteButton('4'));
     await settle();
-    assert.deepEqual(copies, [citationLink('cite_note-4')]);
+    assert.deepEqual(copies, [footnoteLink(second.marker.id, '4')]);
 });
 
 test('focus can move within the menu; leaving it closes the popup', () => {
-    const { fire, trigger, tip, menu, citationButton, document } = setup();
+    const { fire, trigger, tip, menu, footnoteButton, document } = setup();
     fire('focusin');
     click(trigger);
     const focusout = target => {
@@ -508,7 +595,7 @@ test('focus can move within the menu; leaving it closes the popup', () => {
         Object.defineProperty(event, 'relatedTarget', { value: target });
         tip.dispatchEvent(event);
     };
-    focusout(citationButton());
+    focusout(footnoteButton());
     assert.equal(menu.hidden, false);
     focusout(document.body);
     assert.equal(menu.hidden, true);
@@ -528,12 +615,11 @@ test('cleanup removes controls and listeners', () => {
 });
 
 test('encoded Chinese citation IDs resolve to the actual reference-list entry', async () => {
-    const { fire, citationButton, footnoteButton, copies } = setup({ referenceId: 'cite_note-中文來源-3', footnoteId: 'cite_ref-中文來源_3-0' });
+    const { fire, footnoteButton, copies } = setup({ referenceId: 'cite_note-中文來源-3', footnoteId: 'cite_ref-中文來源_3-0' });
     fire('mouseover');
-    click(citationButton());
     click(footnoteButton());
     await settle();
-    assert.deepEqual(copies, [citationLink('cite_note-中文來源-3'), footnoteLink('cite_ref-中文來源_3-0', '3')]);
+    assert.deepEqual(copies, [footnoteLink('cite_ref-中文來源_3-0', '3')]);
 });
 
 test('invalid targets, unrelated URLs and missing revisions have no copy tip', () => {

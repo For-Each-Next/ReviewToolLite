@@ -10,6 +10,7 @@ import {
 interface ConfirmationDialogOptions {
     title: string;
     message: string;
+    detail?: string;
     confirmLabel: string;
     cancelLabel: string;
 }
@@ -47,7 +48,10 @@ export async function openConfirmationDialog(options: ConfirmationDialogOptions)
                     onPrimary: () => close(true),
                     onDefault: () => close(false),
                     'onUpdate:open': (value: boolean) => { if (!value) close(false); }
-                }, { default: () => Vue.h('p', options.message) });
+                }, { default: () => [
+                    Vue.h('p', options.message),
+                    ...(options.detail ? [Vue.h('p', options.detail)] : [])
+                ] });
             }
         });
         mountApp(app);

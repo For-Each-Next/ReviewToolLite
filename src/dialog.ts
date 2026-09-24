@@ -5,13 +5,9 @@ export type VueModule = typeof import('vue') & {
     createMwApp: (options: Component) => VueApp;
 };
 
-type CodexModule = Partial<{
-    CdxDialog: unknown;
-    CdxButton: unknown;
-    CdxMenuButton: unknown;
-    CdxSelect: unknown;
-    CdxTextArea: unknown;
-}>;
+// The npm package supplies types; MediaWiki supplies the runtime via ResourceLoader.
+type CodexModule = Partial<Pick<typeof import('@wikimedia/codex'),
+    'CdxDialog' | 'CdxButton' | 'CdxMenuButton' | 'CdxSelect' | 'CdxTextArea'>>;
 
 let mountedApp: VueApp | null = null;
 let imeListenersInstalled = false;

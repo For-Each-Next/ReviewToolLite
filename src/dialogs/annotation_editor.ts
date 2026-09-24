@@ -7,10 +7,12 @@ import {
     getMountedApp
 } from '../dialog';
 import AnnotationEditorDialog from './components/annotation_editor.vue';
+import type { RelatedSource } from '../dom/related_sources';
 
 export interface AnnotationEditorDialogOptions {
     sectionPath: string;
     sentenceText: string;
+    relatedSources?: RelatedSource[];
     initialOpinion?: string;
     mode?: 'create' | 'edit';
     allowDelete?: boolean;
@@ -25,6 +27,7 @@ export async function openAnnotationEditorDialog(options: AnnotationEditorDialog
     const dialogOptions: Required<AnnotationEditorDialogOptions> = {
         sectionPath: options.sectionPath,
         sentenceText: options.sentenceText,
+        relatedSources: options.relatedSources ?? [],
         initialOpinion: options.initialOpinion || '',
         mode: options.mode || 'create',
         allowDelete: options.allowDelete ?? options.mode === 'edit'

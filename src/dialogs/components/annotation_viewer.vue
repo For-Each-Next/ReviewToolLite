@@ -111,6 +111,7 @@ onMounted(() => {
 });
 onUnmounted(() => window.clearInterval(timeRefreshInterval));
 
+const talkPageTitle = mw.Title.newFromText(props.pageName)?.getTalkPage()?.getPrefixedText();
 const reviewDestinations = [
     {
         value: 'Wikipedia:典范条目评选/提名区',
@@ -127,7 +128,11 @@ const reviewDestinations = [
     {
         value: 'Wikipedia:同行评审/提案区',
         label: state.convByVar({ hant: '同行評審', hans: '同行评审' })
-    }
+    },
+    ...(talkPageTitle ? [{
+        value: talkPageTitle,
+        label: state.convByVar({ hant: '討論頁', hans: '讨论页' })
+    }] : [])
 ];
 defineExpose({ open, groups, canUndoClear });
 
@@ -205,9 +210,10 @@ async function handleCopyReview(action: string | number | null) {
     if (isEmpty.value || copyingReview.value || importing.value) return;
     const destination = reviewDestinations.find(item => item.value === action);
     if (action !== 'copy' && !destination) return;
-    const url = destination
-        ? `${mw.util.getUrl(destination.value)}#${mw.util.escapeIdForLink(props.pageName.replace(/_/g, ' '))}`
-        : null;
+    let url = destination ? mw.util.getUrl(destination.value) : null;
+    if (url && destination.value !== talkPageTitle) {
+        url += `#${mw.util.escapeIdForLink(props.pageName.replace(/_/g, ' '))}`;
+    }
     copyingReview.value = true;
     try {
         const copied = await copyWritingReview(groups.value);

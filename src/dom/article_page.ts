@@ -3,6 +3,7 @@ import { addPortletTrigger, getHeadingTitle } from './utils';
 import state from '../state';
 import { confirmClearOnFirstActivation } from '../annotation_session';
 import { installReferenceLinkTips, REFERENCE_MARKER_SELECTOR, REFERENCE_CONTROLS_SELECTOR } from './reference_links';
+import { collectRelatedSources } from './related_sources';
 import {
     createAnnotation,
     deleteAnnotation,
@@ -449,6 +450,13 @@ export function wrapSectionSentences(sectionStart: Element, sectionEnd: Element 
         if (el.classList.contains(ANNOTATION_CONTAINER_CLASS) || el.classList.contains('review-tool-inline-annotation')
             || el.matches(REFERENCE_CONTROLS_SELECTOR)) return true;
 
+        // Range extraction can split and clone inline citation markup, separating
+        // its source and archive links. Keep reference nodes and tables intact;
+        // text selection still permits annotations inside these structures.
+        if (el.matches(`${REFERENCE_MARKER_SELECTOR}, .reference-text, .mw-reference-text, .citation, .mw-cite-backlink,
+            .references, .mw-references-wrap, .reflist, [id^="cite_note-"],
+            table, pre, code, svg, math, script, style, noscript, button, input, select, textarea`)) return true;
+
         // Skip elements with data attributes indicating they're from other scripts
         if (el.hasAttribute('data-gadget') || el.hasAttribute('data-widget')) return true;
 
@@ -884,6 +892,10 @@ async function openAnnotationDialog(pageName: string, annotationId: string | nul
     sectionPath = sectionPath === '目次' ? '序言' : sectionPath;
 
     try {
+        const container = getArticleContentContainer();
+        const sourceRange = selectionRange ?? (container && existingAnnotation
+            ? findAnnotationRange(buildArticleTextIndex(container), existingAnnotation, computeSectionPathFromNode) : null);
+        const relatedSources = container ? collectRelatedSources(container, sourceRange) : [];
         if (shouldReopenViewer) {
             closeAnnotationViewerDialog();
         }
@@ -891,6 +903,7 @@ async function openAnnotationDialog(pageName: string, annotationId: string | nul
         const result = await openAnnotationEditorDialog({
             sectionPath,
             sentenceText: displaySentenceText,
+            relatedSources,
             initialOpinion,
             mode: isEdit ? 'edit' : 'create',
             allowDelete: isEdit

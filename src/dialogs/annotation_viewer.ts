@@ -52,6 +52,7 @@ export async function openAnnotationViewerDialog(options: AnnotationViewerDialog
     if (getMountedApp()) removeDialogMount();
     try {
         const { Vue, Codex } = await loadCodexAndVue();
+        await mw.loader.using('mediawiki.Title');
         const { groups: initialGroups = [], ...dialogOptions } = options;
         const app = Vue.createMwApp({
             render: () => Vue.h(AnnotationViewerDialog, {

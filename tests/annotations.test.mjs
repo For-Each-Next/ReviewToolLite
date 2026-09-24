@@ -214,7 +214,7 @@ test('clear and undo work with session storage fallback', () => {
 function activationSession(storage, confirm) {
     const { globals } = createDialogEnvironment({
         onDialog: dialog => {
-            void Promise.resolve(confirm()).then(accepted => {
+            void Promise.resolve(confirm(dialog)).then(accepted => {
                 if (accepted) dialog.props.onPrimary();
                 else dialog.props.onDefault();
             });
@@ -226,6 +226,22 @@ function activationSession(storage, confirm) {
         console: { error() {}, warn() {} }
     });
 }
+
+test('new-review confirmation shows the latest annotation edit in its own paragraph', async () => {
+    const { api, localStorage, sessionStorage } = setup();
+    api.importAnnotations(pageName, backup([
+        { ...annotation, createdAt: new Date(2026, 8, 20, 9, 0).getTime(), updatedAt: new Date(2026, 8, 23, 14, 30).getTime() },
+        { ...annotation, id: 'newer', createdAt: new Date(2026, 8, 21, 10, 0).getTime(), updatedAt: undefined }
+    ]));
+    const session = activationSession({ localStorage, sessionStorage }, dialog => {
+        const paragraphs = dialog.children.default();
+        assert.equal(paragraphs.length, 2);
+        assert.equal(paragraphs[1].component, 'p');
+        assert.match(paragraphs[1].props, /^最後修改時間：2026年9月23日 14:30 \[.+\]$/);
+        return false;
+    });
+    await session.confirmClearOnFirstActivation(pageName, () => assert.fail('unexpected clear'));
+});
 
 for (const accepted of [true, false]) {
     test(`first activation prompts once and ${accepted ? 'clears on confirmation' : 'preserves comments on cancel'}`, async () => {

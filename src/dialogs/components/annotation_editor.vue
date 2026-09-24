@@ -2,6 +2,8 @@
 import state from '../../state';
 import { closeDialogAfterTransition } from '../../dialog';
 import { commentShortcuts as vCommentShortcuts } from '../comment_shortcuts';
+import { copyText } from '../../clipboard';
+import type { RelatedSource } from '../../dom/related_sources';
 import { ref, computed, watch } from 'vue';
 
 type AnnotationEditorI18n = {
@@ -9,6 +11,10 @@ type AnnotationEditorI18n = {
     titleEdit: string;
     sectionLabel: string;
     sentenceLabel: string;
+    sourcesLabel: string;
+    copySource: string;
+    sourceCopied: string;
+    sourceCopyFailed: string;
     opinionLabel: string;
     opinionPlaceholder: string;
     opinionRequired: string;
@@ -25,6 +31,10 @@ function buildI18n(): AnnotationEditorI18n {
         titleEdit: state.convByVar({ hant: '編輯批註', hans: '编辑批注' }),
         sectionLabel: state.convByVar({ hant: '章節：', hans: '章节：' }),
         sentenceLabel: state.convByVar({ hant: '句子：', hans: '句子：' }),
+        sourcesLabel: state.convByVar({ hant: '相關來源', hans: '相关来源' }),
+        copySource: state.convByVar({ hant: '複製', hans: '复制' }),
+        sourceCopied: state.convByVar({ hant: '已複製。', hans: '已复制。' }),
+        sourceCopyFailed: state.convByVar({ hant: '無法複製，請選取連結文字手動複製。', hans: '无法复制，请选取链接文字手动复制。' }),
         opinionLabel: state.convByVar({ hant: '批註內容', hans: '批注内容' }),
         opinionPlaceholder: state.convByVar({ hant: '請輸入批註內容…', hans: '请输入批注内容…' }),
         opinionRequired: state.convByVar({ hant: '批註內容不能為空', hans: '批注内容不能为空' }),
@@ -40,6 +50,7 @@ const props = withDefaults(defineProps<{
     mode?: 'create' | 'edit';
     sectionPath?: string;
     sentenceText?: string;
+    relatedSources?: RelatedSource[];
     initialOpinion?: string;
     allowDelete?: boolean;
     onResolve?: (result: { action: 'save'; opinion: string } | { action: 'delete' } | { action: 'cancel' }) => void;
@@ -47,6 +58,7 @@ const props = withDefaults(defineProps<{
     mode: 'create',
     sectionPath: '',
     sentenceText: '',
+    relatedSources: () => [],
     initialOpinion: '',
     allowDelete: false,
     onResolve: undefined
@@ -56,6 +68,19 @@ const i18n = buildI18n();
 const open = ref(true);
 const opinion = ref(typeof props.initialOpinion === 'string' ? props.initialOpinion : '');
 const showValidationError = ref(false);
+const sourceCopyStatus = ref('');
+const failedSourceWikitext = ref('');
+
+async function copySource(source: RelatedSource) {
+    failedSourceWikitext.value = '';
+    try {
+        await copyText(source.wikitext);
+        sourceCopyStatus.value = `${source.label} ${i18n.sourceCopied}`;
+    } catch {
+        failedSourceWikitext.value = source.wikitext;
+        sourceCopyStatus.value = i18n.sourceCopyFailed;
+    }
+}
 
 const dialogTitle = computed(() => (props.mode === 'edit' ? i18n.titleEdit : i18n.titleCreate));
 const primaryLabel = computed(() => (props.mode === 'edit' ? i18n.save : i18n.create));
@@ -122,6 +147,24 @@ function onUpdateOpen(newValue: boolean) {
                 aria-labelledby="annotation-sentence-label"
                 tabindex="0"
             >{{ props.sentenceText }}</div>
+        </div>
+
+        <div v-if="props.relatedSources.length" class="review-tool-form-section">
+            <div id="annotation-sources-label" class="review-tool-annotation-editor__label">{{ i18n.sourcesLabel }}</div>
+            <ul class="review-tool-annotation-editor__sources" aria-labelledby="annotation-sources-label">
+                <li v-for="source in props.relatedSources" :key="source.wikitext">
+                    <a :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a>
+                    <span class="review-tool-source-copy">[<a
+                        href="#"
+                        :title="`${i18n.copySource}${source.label}`"
+                        :aria-label="`${i18n.copySource}${source.label}`"
+                        @click.prevent="copySource(source)"
+                        @keydown.space.prevent="copySource(source)"
+                    >{{ i18n.copySource }}{{ source.label }}</a>]</span>
+                    <code v-if="failedSourceWikitext === source.wikitext">{{ source.wikitext }}</code>
+                </li>
+            </ul>
+            <div role="status" class="review-tool-annotation-editor__sources-hint">{{ sourceCopyStatus }}</div>
         </div>
 
         <div class="review-tool-form-section" v-comment-shortcuts>
