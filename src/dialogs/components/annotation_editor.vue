@@ -18,6 +18,9 @@ type AnnotationEditorI18n = {
     opinionLabel: string;
     opinionPlaceholder: string;
     opinionRequired: string;
+    quickInput: string;
+    smallText: string;
+    joking: string;
     cancel: string;
     save: string;
     create: string;
@@ -38,6 +41,9 @@ function buildI18n(): AnnotationEditorI18n {
         opinionLabel: state.convByVar({ hant: '批註內容', hans: '批注内容' }),
         opinionPlaceholder: state.convByVar({ hant: '請輸入批註內容…', hans: '请输入批注内容…' }),
         opinionRequired: state.convByVar({ hant: '批註內容不能為空', hans: '批注内容不能为空' }),
+        quickInput: state.convByVar({ hant: '快速輸入', hans: '快速输入' }),
+        smallText: state.convByVar({ hant: '小字', hans: '小字' }),
+        joking: state.convByVar({ hant: '開玩笑的', hans: '开玩笑的' }),
         cancel: state.convByVar({ hant: '取消', hans: '取消' }),
         save: state.convByVar({ hant: '儲存', hans: '保存' }),
         create: state.convByVar({ hant: '新增', hans: '新增' }),
@@ -65,11 +71,34 @@ const props = withDefaults(defineProps<{
 });
 
 const i18n = buildI18n();
+const quickInputs = [
+    { label: i18n.smallText, openTag: '<small>', closeTag: '</small>' },
+    {
+        label: i18n.joking,
+        openTag: '<span title="開玩笑的" style="color: grey; text-decoration: line-through">',
+        closeTag: '</span>'
+    }
+];
 const open = ref(true);
+const opinionField = ref<HTMLElement | null>(null);
 const opinion = ref(typeof props.initialOpinion === 'string' ? props.initialOpinion : '');
 const showValidationError = ref(false);
 const sourceCopyStatus = ref('');
 const failedSourceWikitext = ref('');
+
+function insertCommentMarkup(openTag: string, closeTag: string) {
+    const textarea = opinionField.value?.querySelector('textarea');
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const direction = textarea.selectionDirection;
+    const selectedText = textarea.value.slice(start, end);
+    textarea.focus();
+    textarea.setRangeText(`${openTag}${selectedText}${closeTag}`, start, end, 'select');
+    textarea.setSelectionRange(start + openTag.length, end + openTag.length, direction);
+    // Update the Codex text area and Vue model through the existing input handler.
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 async function copySource(source: RelatedSource) {
     failedSourceWikitext.value = '';
@@ -167,10 +196,21 @@ function onUpdateOpen(newValue: boolean) {
             <div role="status" class="review-tool-annotation-editor__sources-hint">{{ sourceCopyStatus }}</div>
         </div>
 
-        <div class="review-tool-form-section" v-comment-shortcuts>
+        <div ref="opinionField" class="review-tool-form-section" v-comment-shortcuts>
             <label class="review-tool-annotation-editor__label" :for="'annotation-opinion-input'">
                 {{ i18n.opinionLabel }}
             </label>
+            <div class="review-tool-annotation-editor__quick-input" role="group" :aria-label="i18n.quickInput">
+                <cdx-button
+                    v-for="input in quickInputs"
+                    :key="input.openTag"
+                    type="button"
+                    size="small"
+                    :title="`${input.openTag}…${input.closeTag}`"
+                    @mousedown.prevent
+                    @click="insertCommentMarkup(input.openTag, input.closeTag)"
+                >{{ input.label }}</cdx-button>
+            </div>
             <cdx-text-area
                 id="annotation-opinion-input"
                 v-model="opinion"

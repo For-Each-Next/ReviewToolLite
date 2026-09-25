@@ -255,6 +255,13 @@
     margin-top: 4px;
 }
 
+.review-tool-annotation-editor__quick-input {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
 .review-tool-annotation-editor__footer {
     display: flex;
     flex-wrap: wrap;
