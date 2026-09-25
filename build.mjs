@@ -85,12 +85,13 @@ function rewriteVueNamedImports(code) {
     });
 }
 
-const vueSfcPlugin = {
+export const vueSfcPlugin = {
     name: 'vue-sfc',
     setup(build) {
         build.onLoad({ filter: /\.vue$/ }, async (args) => {
             const source = await readFile(args.path, 'utf8');
-            const { descriptor } = parse(source, { filename: args.path });
+            const { descriptor, errors } = parse(source, { filename: args.path });
+            if (errors.length) throw new Error(errors.map(error => String(error)).join('\n'));
             const id = createHash('sha256').update(args.path).digest('hex').slice(0, 8);
 
             let scriptCode = 'const __sfc__ = {};';
@@ -119,6 +120,9 @@ const vueSfcPlugin = {
                         bindingMetadata
                     }
                 });
+                if (compiledTemplate.errors.length) {
+                    throw new Error(compiledTemplate.errors.map(error => String(error)).join('\n'));
+                }
                 const importRegex = /^import\s*\{([^}]+)\}\s*from\s*["']vue["'];?/m;
                 const constRegex = /^const\s*\{([^}]+)\}\s*=\s*Vue;?/m;
                 const importMatch = compiledTemplate.code.match(importRegex);

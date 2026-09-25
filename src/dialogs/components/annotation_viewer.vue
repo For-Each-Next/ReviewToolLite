@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import state from '../../state';
-import type { AnnotationGroup, Annotation } from '../../annotations';
+import type { AnnotationGroup } from '../../annotations';
 import { groupAnnotations, groupAnnotationsByTime, sortGroupsByPosition } from '../../annotation_order';
 import { formatAnnotationTimestamp, getAnnotationTimeRange } from '../../annotation_time';
 import { closeDialogAfterTransition } from '../../dialog';
@@ -94,7 +94,7 @@ const props = withDefaults(defineProps<{
 
 const i18n = buildI18n();
 const open = ref(true);
-const groups = ref<AnnotationGroup[]>(props.initialGroups || []);
+const groups = ref<AnnotationGroup[]>(props.initialGroups);
 const canUndoClear = ref(props.initialCanUndoClear);
 const deletingAnnotationId = ref<string | null>(null);
 const clearingAll = ref(false);
@@ -137,10 +137,7 @@ const reviewDestinations = [
 defineExpose({ open, groups, canUndoClear });
 
 const canClearAll = computed(() => Boolean(props.onClearAllAnnotations));
-const isEmpty = computed(() => {
-    if (!Array.isArray(groups.value) || !groups.value.length) return true;
-    return groups.value.every((group: AnnotationGroup) => !group.annotations || group.annotations.length === 0);
-});
+const isEmpty = computed(() => groups.value.every(group => !group.annotations.length));
 
 const fileActionsDisabled = computed(() => importing.value || clearingAll.value || deletingAnnotationId.value !== null);
 const fileMenuItems = computed(() => [
@@ -148,15 +145,13 @@ const fileMenuItems = computed(() => [
     { value: 'export', label: i18n.export, disabled: isEmpty.value }
 ]);
 
-const flattenedAnnotations = computed(() => groups.value.reduce<Annotation[]>(
-    (annotations, group) => annotations.concat(group.annotations), []
-));
+const flattenedAnnotations = computed(() => groups.value.flatMap(group => group.annotations));
 const timeRange = computed(() => getAnnotationTimeRange(flattenedAnnotations.value));
 
 const sortingOptions = computed(() => ([
-    { value: 'position', label: i18n.sortPosition || '頁面位置' },
-    { value: 'created-desc', label: i18n.sortCreatedDesc || '最新時間優先' },
-    { value: 'created-asc', label: i18n.sortCreatedAsc || '最早時間優先' }
+    { value: 'position', label: i18n.sortPosition },
+    { value: 'created-desc', label: i18n.sortCreatedDesc },
+    { value: 'created-asc', label: i18n.sortCreatedAsc }
 ]));
 
 const selectedSortLabel = computed(() => sortingOptions.value.find(option => option.value === sortMethod.value)?.label);
@@ -252,14 +247,10 @@ function handleExport() {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-        if (mw && mw.notify) {
-            mw.notify(i18n.exportDone, { tag: 'review-tool' });
-        }
+        mw.notify(i18n.exportDone, { tag: 'review-tool' });
     } catch (error) {
         console.error('[ReviewTool] Failed to export annotations', error);
-        if (mw && mw.notify) {
-            mw.notify(i18n.exportError, { type: 'error', title: '[ReviewTool]' });
-        }
+        mw.notify(i18n.exportError, { type: 'error', title: '[ReviewTool]' });
     }
 }
 

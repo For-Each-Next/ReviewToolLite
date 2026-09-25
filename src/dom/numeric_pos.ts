@@ -1,23 +1,3 @@
-export type PathArray = number[];
-
-export interface OrderKeyOptions {
-    root?: Element | string;
-    paddingWidth?: number;
-}
-
-const DEFAULT_ROOT_SELECTOR = '#mw-content-text';
-const DEFAULT_PADDING = 6;
-
-function resolveRoot(root?: Element | string): Element | null {
-    if (!root) {
-        return document.querySelector(DEFAULT_ROOT_SELECTOR);
-    }
-    if (typeof root === 'string') {
-        return document.querySelector(root);
-    }
-    return root;
-}
-
 function countPreviousElementSiblings(node: Element | null): number {
     let index = 0;
     let sibling = node?.previousElementSibling ?? null;
@@ -28,9 +8,9 @@ function countPreviousElementSiblings(node: Element | null): number {
     return index;
 }
 
-export function getElementPathArray(element: Element | null, root?: Element | string): PathArray | null {
+function getElementPathArray(element: Element | null): number[] | null {
     if (!element) return null;
-    const rootEl = resolveRoot(root);
+    const rootEl = document.querySelector('#mw-content-text');
     if (!rootEl || !rootEl.contains(element)) return null;
 
     const path: number[] = [];
@@ -49,19 +29,8 @@ export function getElementPathArray(element: Element | null, root?: Element | st
     return path;
 }
 
-export function pathArrayToKey(path: PathArray | null, paddingWidth = DEFAULT_PADDING): string | null {
-    if (!path) return null;
-    const width = Math.max(1, paddingWidth | 0);
-    return path
-        .map((segment) => String(segment).padStart(width, '0'))
-        .join('.');
-}
-
-export function getElementOrderKey(
-    element: Element | null,
-    { root = DEFAULT_ROOT_SELECTOR, paddingWidth = DEFAULT_PADDING }: OrderKeyOptions = {}
-): string | null {
-    return pathArrayToKey(getElementPathArray(element, root), paddingWidth);
+export function getElementOrderKey(element: Element | null): string | null {
+    return getElementPathArray(element)?.map(segment => String(segment).padStart(6, '0')).join('.') ?? null;
 }
 
 export function compareOrderKeys(a?: string | null, b?: string | null): number {

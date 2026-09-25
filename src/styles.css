@@ -170,26 +170,6 @@
     display: block;
 }
 
-.review-tool-annotation-badge {
-    display: inline-block;
-    background: #ffcc00;
-    color: #000;
-    border-radius: 10px;
-    padding: 0 6px;
-    font-size: 11px;
-    margin-left: 4px;
-    vertical-align: baseline;
-    text-decoration: none;
-}
-
-.review-tool-annotation-badge:hover {
-    filter: brightness(1.1);
-}
-
-.review-tool-annotation-badge--section {
-    margin-left: 6px;
-}
-
 .review-tool-inline-annotation {
     display: none;
     align-items: center;
@@ -471,16 +451,14 @@
 }
 
 /* Sentence selection and hover states. */
-.review-tool-annotation-ui.sentence,
-.review-tool-annotation-ui .sentence {
+.review-tool-annotation-ui.sentence {
     background: transparent;
     transition: background 120ms ease-in;
     cursor: pointer;
     pointer-events: auto;
 }
 
-.review-tool-annotation-ui.sentence:hover,
-.review-tool-annotation-ui .sentence:hover {
+.review-tool-annotation-ui.sentence:hover {
     background: rgba(255, 235, 59, 0.22) !important;
 }
 

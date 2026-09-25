@@ -155,7 +155,7 @@ export async function loadCodexAndVue(): Promise<{ Vue: VueModule; Codex: CodexM
     return { Vue, Codex };
 }
 
-export function createDialogMountIfNeeded(): HTMLElement {
+function createDialogMountIfNeeded(): HTMLElement {
     const existing = document.getElementById(MOUNT_ID);
     if (existing) return existing;
     const mountPoint = document.createElement('div');
@@ -165,6 +165,7 @@ export function createDialogMountIfNeeded(): HTMLElement {
 }
 
 export function mountApp(app: VueApp): unknown {
+    if (mountedApp) removeDialogMount();
     const mountPoint = createDialogMountIfNeeded();
     installImeEscGuard();
     mountedApp = app;

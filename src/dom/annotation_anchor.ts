@@ -6,7 +6,7 @@ const EXCLUDED_TEXT = [
     '.reference', '.mw-ref', '.citation', '.ref', '.reference-text', '.reference-note',
     '[data-reference]', '[data-ref]', '.mw-editsection', '.qeec-ref-tag-copy-btn',
     'ipe-quick-edit', '.ipe__in-article-link', '.ipe-quick-edit', '.ipe-quick-edit--create-only',
-    '.review-tool-inline-annotation', '.review-tool-annotation-badge', '.floating-button',
+    '.review-tool-inline-annotation', '.floating-button',
     '.review-tool-global-button', '.review-tool-dialog', '.review-tool-reference-tip'
 ].join(',');
 

@@ -71,12 +71,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeAnnotation(anno: unknown): Annotation | null {
     if (!isRecord(anno)) return null;
-    if (typeof anno.id !== 'string') return null;
+    if (typeof anno.id !== 'string' || !anno.id.trim()) return null;
     if (typeof anno.sectionPath !== 'string') return null;
     if (typeof anno.sentenceText !== 'string') return null;
     if (typeof anno.opinion !== 'string') return null;
     if (typeof anno.createdBy !== 'string') return null;
-    if (typeof anno.createdAt !== 'number') return null;
+    if (typeof anno.createdAt !== 'number' || !Number.isFinite(new Date(anno.createdAt).getTime())) return null;
 
     const sentencePos = typeof anno.sentencePos === 'string' ? anno.sentencePos : '';
     const resolved = typeof anno.resolved === 'boolean' ? anno.resolved : undefined;
@@ -149,7 +149,7 @@ export function loadAnnotations(pageName: string): AnnotationStore {
         .filter((anno): anno is Annotation => !!anno);
 
     const normalized: AnnotationStore = {
-        pageName: typeof parsedRecord?.pageName === 'string' ? parsedRecord.pageName : pageName,
+        pageName,
         createdAt: typeof parsedRecord?.createdAt === 'number' ? parsedRecord.createdAt : Date.now(),
         annotations,
         clearedAnnotations: Array.isArray(parsedRecord?.clearedAnnotations)
@@ -221,7 +221,7 @@ export function importAnnotations(pageName: string, json: string): number {
     // Validate the whole backup before changing storage.
     const annotations = entries.map(entry => {
         const annotation = normalizeAnnotation(entry);
-        if (!annotation || !annotation.id.trim() || !Number.isFinite(annotation.createdAt)) {
+        if (!annotation) {
             throw new Error('Invalid annotation in backup');
         }
         return annotation;
@@ -263,13 +263,8 @@ export function createAnnotation(
         textAnchor
     };
     store.annotations.push(anno);
-    saveAnnotations(store);
+    if (!saveAnnotations(store)) throw new Error('Unable to save annotation');
     return anno;
-}
-
-export function getAnnotationsForSection(pageName: string, sectionPath: string): Annotation[] {
-    const store = loadAnnotations(pageName);
-    return store.annotations.filter(a => a.sectionPath === sectionPath);
 }
 
 export function getAnnotation(pageName: string, id: string): Annotation | null {
@@ -287,7 +282,7 @@ export function updateAnnotation(
     if (idx === -1) return null;
     const updated = { ...store.annotations[idx], ...updates, updatedAt: Date.now() };
     store.annotations[idx] = updated;
-    saveAnnotations(store);
+    if (!saveAnnotations(store)) throw new Error('Unable to update annotation');
     return updated;
 }
 
@@ -296,7 +291,7 @@ export function deleteAnnotation(pageName: string, id: string): boolean {
     const before = store.annotations.length;
     store.annotations = store.annotations.filter(a => a.id !== id);
     if (store.annotations.length !== before) {
-        saveAnnotations(store);
+        if (!saveAnnotations(store)) throw new Error('Unable to delete annotation');
         return true;
     }
     return false;

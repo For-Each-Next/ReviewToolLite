@@ -4,9 +4,7 @@ import {
     closeDialogAfterTransition,
     loadCodexAndVue,
     mountApp,
-    registerCodexComponents,
-    removeDialogMount,
-    getMountedApp
+    registerCodexComponents
 } from '../dialog';
 import AnnotationViewerDialog from './components/annotation_viewer.vue';
 
@@ -49,7 +47,6 @@ export function updateAnnotationViewerDialogGroups(groups: AnnotationGroup[], ca
 }
 
 export async function openAnnotationViewerDialog(options: AnnotationViewerDialogOptions): Promise<void> {
-    if (getMountedApp()) removeDialogMount();
     try {
         const { Vue, Codex } = await loadCodexAndVue();
         await mw.loader.using('mediawiki.Title');

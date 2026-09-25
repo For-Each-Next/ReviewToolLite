@@ -74,7 +74,8 @@ for (const [name, json] of [
     ['invalid groups', '{"groups":[null]}'],
     ['partially invalid entries', backup([annotation, { id: 'invalid' }])],
     ['empty IDs', backup([{ ...annotation, id: ' ' }])],
-    ['non-finite timestamps', backup([annotation]).replace('1234', '1e400')]
+    ['non-finite timestamps', backup([annotation]).replace('1234', '1e400')],
+    ['out-of-range dates', backup([{ ...annotation, createdAt: Number.MAX_VALUE }])]
 ]) {
     test(`rejects ${name} without changing saved annotations`, () => {
         const { api, localStorage } = setup();
@@ -130,6 +131,32 @@ test('reports failed persistence while preserving the existing backup', () => {
     localStorage.setItem = sessionStorage.setItem = () => { throw new Error('Quota exceeded'); };
     assert.throws(() => api.importAnnotations(pageName, backup([{ ...annotation, id: 'new' }])), /Unable to save/);
     assert.equal(localStorage.getItem(key), before);
+});
+
+for (const action of ['create', 'update', 'delete']) {
+    test(`failed ${action} reports an error without changing the saved annotations`, () => {
+        const { api, localStorage, sessionStorage } = setup();
+        api.importAnnotations(pageName, backup([annotation]));
+        const before = localStorage.getItem(key);
+        localStorage.setItem = sessionStorage.setItem = () => { throw new Error('Quota exceeded'); };
+        const actions = {
+            create: () => api.createAnnotation(pageName, '序言', '新原文', '新建議'),
+            update: () => api.updateAnnotation(pageName, annotation.id, { opinion: '修改' }),
+            delete: () => api.deleteAnnotation(pageName, annotation.id)
+        };
+        assert.throws(actions[action], /Unable to/);
+        assert.equal(localStorage.getItem(key), before);
+        assert.equal(api.getAnnotation(pageName, annotation.id).opinion, annotation.opinion);
+    });
+}
+
+test('stored page metadata cannot redirect later edits into a different article', () => {
+    const { api, localStorage } = setup();
+    localStorage.setItem(key, JSON.stringify({ pageName: 'Wrong page', annotations: [annotation] }));
+    api.updateAnnotation(pageName, annotation.id, { opinion: '修改' });
+    assert.equal(api.loadAnnotations(pageName).pageName, pageName);
+    assert.equal(api.getAnnotation(pageName, annotation.id).opinion, '修改');
+    assert.equal(localStorage.getItem('reviewtool:annotations:Wrong page'), null);
 });
 
 test('clearing saves an undo copy that survives reload and restores author, positions and anchors', () => {

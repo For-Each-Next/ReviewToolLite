@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { build } from 'esbuild';
-import { parse, compileScript } from '@vue/compiler-sfc';
+import { vueSfcPlugin } from '../build.mjs';
 import { JSDOM } from 'jsdom';
 import { compileModule } from './helpers/load-module.mjs';
 
@@ -80,22 +79,13 @@ test('editing saved comments restores sources while missing or uncited selection
 const editorBundle = await build({
     stdin: {
         contents: `import Editor from './src/dialogs/components/annotation_editor.vue';
-            import { createApp, h, nextTick } from 'vue';
-            export { Editor, createApp, h, nextTick };`,
+            import * as Vue from 'vue';
+            export { Editor, Vue };`,
         resolveDir: resolve('.'), loader: 'ts'
     },
     bundle: true, write: false, format: 'iife', globalName: 'editorTest',
     define: { __VUE_OPTIONS_API__: 'true', __VUE_PROD_DEVTOOLS__: 'false', __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false' },
-    plugins: [{
-        name: 'vue-test',
-        setup(builder) {
-            builder.onLoad({ filter: /\.vue$/ }, async ({ path }) => {
-                const { descriptor } = parse(await readFile(path, 'utf8'), { filename: path });
-                const script = compileScript(descriptor, { id: 'editor-test', inlineTemplate: true });
-                return { contents: script.content, loader: 'ts', resolveDir: dirname(path) };
-            });
-        }
-    }]
+    plugins: [vueSfcPlugin]
 });
 
 test('comment dialog shows source titles and bracketed text copy links without changing the opinion', async t => {
@@ -104,7 +94,9 @@ test('comment dialog shows source titles and bracketed text copy links without c
     window.mw = mw;
     Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async text => copies.push(text) } });
     window.eval(editorBundle.outputFiles[0].text);
-    const { Editor, createApp, h, nextTick } = window.editorTest;
+    const { Editor, Vue } = window.editorTest;
+    window.Vue = Vue;
+    const { createApp, h, nextTick } = Vue;
     // Preserve letters and subreference numbering exactly as supplied by Cite.
     const relatedSources = sources(select('first')).map((source, index) => ({
         ...source,

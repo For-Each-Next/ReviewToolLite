@@ -5,16 +5,12 @@ import { JSDOM } from 'jsdom';
 
 const { outputFiles } = await build({
     stdin: {
-        contents: `export { wrapSectionSentences, clearWrappedSentences } from './src/dom/article_page';
+        contents: `export { wrapArticleSentences, clearWrappedSentences } from './src/dom/sentence_wrapping';
             export { getReferenceLinkData, installReferenceLinkTips } from './src/dom/reference_links';
             export { collectRelatedSources } from './src/dom/related_sources';`,
         resolveDir: process.cwd(), loader: 'ts'
     },
-    bundle: true, write: false, format: 'iife', globalName: 'articleTest',
-    // These tests exercise real article wrapping and copying, without opening dialogs.
-    plugins: [{ name: 'unused-dialogs', setup(builder) {
-        builder.onLoad({ filter: /\.vue$/ }, () => ({ contents: 'export default {}', loader: 'js' }));
-    } }]
+    bundle: true, write: false, format: 'iife', globalName: 'articleTest'
 });
 
 for (const lang of ['zh-Hant', 'en']) {
@@ -45,7 +41,7 @@ for (const lang of ['zh-Hant', 'en']) {
         window.mw = { config: { get: key => key === 'wgRevisionId' ? 12345 : 'Reviewer' }, notify: () => {} };
         Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async text => copies.push(text) } });
         window.eval(outputFiles[0].text);
-        const { wrapSectionSentences, clearWrappedSentences, getReferenceLinkData, installReferenceLinkTips, collectRelatedSources } = window.articleTest;
+        const { wrapArticleSentences, clearWrappedSentences, getReferenceLinkData, installReferenceLinkTips, collectRelatedSources } = window.articleTest;
         const root = document.querySelector('main');
         const note = document.getElementById(noteId);
         const originalCitation = note.outerHTML;
@@ -53,7 +49,7 @@ for (const lang of ['zh-Hant', 'en']) {
         const cleanup = installReferenceLinkTips(root);
 
         for (let activation = 0; activation < 2; activation++) {
-            wrapSectionSentences(root, null);
+            wrapArticleSentences(root);
             assert.ok(root.querySelector('p .sentence'), 'article sentences should still be wrapped');
             const marker = document.getElementById(markerId);
             assert.equal(getReferenceLinkData(root, marker).footnote, expected, 'wrapping must not hide the archive');
@@ -65,7 +61,7 @@ for (const lang of ['zh-Hant', 'en']) {
             document.querySelector('[role="menuitem"]').click();
             await new Promise(resolve => setImmediate(resolve));
             assert.equal(copies.at(-1), expected, 'the clipboard should include both links');
-            clearWrappedSentences();
+            clearWrappedSentences(root);
             assert.equal(note.outerHTML, originalCitation);
         }
         cleanup();
@@ -90,14 +86,14 @@ test('annotation wrapping preserves tables, styles and controls, including exist
         const { document } = window;
         window.mw = { config: { get: () => 'Reviewer' } };
         window.eval(outputFiles[0].text);
-        const { wrapSectionSentences, clearWrappedSentences } = window.articleTest;
+        const { wrapArticleSentences, clearWrappedSentences } = window.articleTest;
         const root = document.querySelector('main');
         const protectedElements = [...root.querySelectorAll('table, table *, style, code, pre, select, option, textarea')];
         const originalHtml = protectedElements.map(element => element.outerHTML);
         let clicks = 0;
         document.querySelector('button').addEventListener('click', () => clicks++);
         for (let activation = 0; activation < 2; activation++) {
-            wrapSectionSentences(root, null);
+            wrapArticleSentences(root);
             assert.ok(root.querySelector('p .sentence'));
             protectedElements.forEach((element, index) => {
                 assert.ok(root.contains(element), 'existing elements must retain their identity');
@@ -105,7 +101,7 @@ test('annotation wrapping preserves tables, styles and controls, including exist
             });
             document.querySelector('button').click();
             assert.equal(clicks, activation + 1, 'existing controls must still work');
-            clearWrappedSentences();
+            clearWrappedSentences(root);
         }
     } finally {
         window.close();

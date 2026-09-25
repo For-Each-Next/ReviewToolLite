@@ -53,7 +53,6 @@ test('a stale close timer cannot remove a replacement dialog or run its close ca
     const replacement = app();
     api.mountApp(previous);
     api.closeDialogAfterTransition(() => assert.fail('stale callback ran'));
-    api.removeDialogMount();
     api.mountApp(replacement);
     flush();
     assert.equal(previous.unmounts, 1);

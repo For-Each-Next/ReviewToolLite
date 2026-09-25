@@ -1,10 +1,8 @@
 import type { Component } from 'vue';
 import {
     closeDialogAfterTransition,
-    getMountedApp,
     loadCodexAndVue,
-    mountApp,
-    removeDialogMount
+    mountApp
 } from '../dialog';
 
 interface ConfirmationDialogOptions {
@@ -18,8 +16,6 @@ interface ConfirmationDialogOptions {
 export async function openConfirmationDialog(options: ConfirmationDialogOptions): Promise<boolean> {
     const { Vue, Codex } = await loadCodexAndVue();
     if (!Codex.CdxDialog) throw new Error('Codex dialog is unavailable');
-    if (getMountedApp()) removeDialogMount();
-
     return new Promise<boolean>((resolve) => {
         const app = Vue.createMwApp({
             setup() {

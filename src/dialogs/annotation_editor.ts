@@ -2,9 +2,7 @@ import state from '../state';
 import {
     loadCodexAndVue,
     mountApp,
-    registerCodexComponents,
-    removeDialogMount,
-    getMountedApp
+    registerCodexComponents
 } from '../dialog';
 import AnnotationEditorDialog from './components/annotation_editor.vue';
 import type { RelatedSource } from '../dom/related_sources';
@@ -21,7 +19,7 @@ export interface AnnotationEditorDialogOptions {
 export type AnnotationEditorDialogResult =
     | { action: 'save'; opinion: string }
     | { action: 'delete' }
-    | { action: 'cancel' };
+    | { action: 'cancel' | 'replaced' };
 
 export async function openAnnotationEditorDialog(options: AnnotationEditorDialogOptions): Promise<AnnotationEditorDialogResult> {
     const dialogOptions: Required<AnnotationEditorDialogOptions> = {
@@ -33,13 +31,14 @@ export async function openAnnotationEditorDialog(options: AnnotationEditorDialog
         allowDelete: options.allowDelete ?? options.mode === 'edit'
     };
 
-    if (getMountedApp()) removeDialogMount();
-
     try {
         const { Vue, Codex } = await loadCodexAndVue();
         return await new Promise<AnnotationEditorDialogResult>((resolve) => {
             const app = Vue.createMwApp({
-                render: () => Vue.h(AnnotationEditorDialog, { ...dialogOptions, onResolve: resolve })
+                setup() {
+                    Vue.onUnmounted(() => resolve({ action: 'replaced' }));
+                    return () => Vue.h(AnnotationEditorDialog, { ...dialogOptions, onResolve: resolve });
+                }
             });
             registerCodexComponents(app, Codex);
             mountApp(app);
